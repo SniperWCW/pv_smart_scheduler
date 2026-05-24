@@ -4,20 +4,17 @@ import json
 import os
 from datetime import timedelta
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
-from homeassistant.components.recorder import history
+from homeassistant.helpers import entry_health
 from homeassistant.util import dt as dt_util
+from homeassistant.components.recorder import history
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass: HomeAssistant, entry):
     """Setup der Integration über ein UI Config Entry."""
-    
-    # Daten dynamisch aus der UI-Eingabe auslesen
     device_power_sensor = entry.data.get("device_power_sensor")
     
-    # Wir spiegeln die Struktur, sodass der Koordinator wie gewohnt damit arbeiten kann
     configured_devices = {
         device_power_sensor: {
             "target_coverage": entry.data.get("target_coverage", 90),
@@ -53,7 +50,6 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         )
         self.devices = devices
         self.learned_profiles = {}
-        # Profil-Dateiname eindeutig pro UI-Instanz benennen
         self.profile_path = hass.config.path(f"pv_smart_scheduler_profiles_{entry_id}.json")
 
     async def async_load_learned_profiles(self):
@@ -100,11 +96,16 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                     profile, stable_forecast, base_load
                 )
 
+                # Annäherung: Wenn die Liste z.B. 120 Einträge hat, gehen wir von ca. 120 Minuten aus
+                avg_watts = sum(profile) / len(profile) if profile else 0
+                estimated_hours = len(profile) / 60
+                total_kwh = (avg_watts * estimated_hours) / 1000
+
                 results[entity_id] = {
                     "recommendation": "ja" if max_coverage >= config["target_coverage"] and best_start == 0 else "warten",
                     "best_start_mins": best_start,
                     "coverage_percent": round(max_coverage, 1),
-                    "total_kwh": round(sum(profile) / 60000, 2),
+                    "total_kwh": round(total_kwh, 2),
                     "weather_stability": round(weather_stability_factor * 100, 0)
                 }
             except Exception as err:
@@ -167,7 +168,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         return default_profile
 
     def _get_pv_forecast(self, forecast_sensor_id):
-        state = self.hass.states.get(forecast_sensor_id)
+        state = self.hass.states.get(forecast_forecast_id := forecast_sensor_id)
         if state and state.state not in ("unknown", "unavailable"):
             try:
                 current_forecast = float(state.state)
