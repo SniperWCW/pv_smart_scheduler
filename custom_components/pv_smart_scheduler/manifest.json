@@ -4,6 +4,7 @@
   "codeowners": [],
   "dependencies": ["recorder"],
   "documentation": "https://github.com/SniperWCW/pv_smart_scheduler",
+  "config_flow": true,
   "iot_class": "local_polling",
   "version": "1.0.0"
 }
