@@ -1,18 +1,27 @@
 import logging
-import datetime
 import json
 import os
 from datetime import timedelta
+
 from homeassistant.core import HomeAssistant
+from homeassistant.config_entries import ConfigEntry
+# WICHTIG: Dieser Import hatte gefehlt, weshalb der Coordinator abstürzte!
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.components.recorder import history
 from homeassistant.util import dt as dt_util
+
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-async def async_setup_entry(hass: HomeAssistant, entry):
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Setzt die Integration via YAML auf (wird ignoriert, da UI-basiert)."""
+    return True
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Setup der Integration über ein UI Config Entry."""
+    hass.data.setdefault(DOMAIN, {})
+
     device_power_sensor = entry.data.get("device_power_sensor")
     
     configured_devices = {
@@ -24,14 +33,19 @@ async def async_setup_entry(hass: HomeAssistant, entry):
     }
 
     coordinator = PVSmartSchedulerCoordinator(hass, configured_devices, entry.entry_id)
+    
+    # Erst gelerntes laden, dann den ersten Refresh erzwingen
     await coordinator.async_load_learned_profiles()
     await coordinator.async_config_entry_first_refresh()
 
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    # Speicher den Koordinator unter der Entry-ID ab
+    hass.data[DOMAIN][entry.entry_id] = coordinator
+    
+    # Sensoren-Plattform laden
     await hass.config_entries.async_forward_entry_setups(entry, ["sensor"])
     return True
 
-async def async_unload_entry(hass: HomeAssistant, entry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Wird aufgerufen, wenn eine Instanz aus der UI gelöscht wird."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, ["sensor"])
     if unload_ok:
@@ -85,7 +99,6 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                 raw_forecast = self._get_pv_forecast(config["pv_forecast_sensor"])
                 stable_forecast = [watt * weather_stability_factor for watt in raw_forecast]
                 
-                # HIER KORRIGIERT: Richtige Zuweisung des Status-Objekts
                 base_load_state = self.hass.states.get(config["home_base_load_sensor"])
                 if base_load_state and base_load_state.state not in ("unknown", "unavailable"):
                     base_load = max(0.0, float(base_load_state.state))
@@ -168,7 +181,6 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         return default_profile
 
     def _get_pv_forecast(self, forecast_sensor_id):
-        # HIER KORRIGIERT: Einfacher, sicherer Aufruf ohne Walrus-Operator
         state = self.hass.states.get(forecast_sensor_id)
         if state and state.state not in ("unknown", "unavailable"):
             try:
