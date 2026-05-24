@@ -20,9 +20,9 @@ class PVSchedulerSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self.device_entity_id = device_entity_id
         
-        # Generiert einen lesbaren Namen (z.B. PV Scheduler Waschmaschine)
-        device_name = device_entity_id.split('.')[-1].replace('_power', '').replace('_', ' ').title()
-        self._attr_name = f"PV Scheduler {device_name}"
+        # Generiert einen sauberen Gerätenamen (z.B. Waschmaschine)
+        self._clean_device_name = device_entity_id.split('.')[-1].replace('_power', '').replace('_', ' ').title()
+        self._attr_name = f"PV Scheduler {self._clean_device_name}"
         self._attr_unique_id = f"pv_sched_{device_entity_id}"
 
     @property
@@ -56,9 +56,9 @@ class PVSchedulerSensor(CoordinatorEntity, SensorEntity):
             "pv_coverage_percent": data["coverage_percent"],
             "estimated_consumption_kwh": data["total_kwh"],
             "weather_stability_percent": data["weather_stability"],
-            # Perfekt als Direkt-Input für Ollama, OpenAI & Co. vorbereitet
+            # Absolut sichere Struktur für Ollama / OpenAI / OpenRouter
             "ai_prompt_context": {
-                "device": self._attr_name.replace("PV Scheduler ", ""),
+                "device": self._clean_device_name,
                 "action_recommended": "START_NOW" if data["recommendation"] == "ja" else "WAIT",
                 "delay_minutes": data["best_start_mins"],
                 "expected_solar_coverage": f"{data['coverage_percent']}%",
