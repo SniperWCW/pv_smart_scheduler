@@ -1,5 +1,7 @@
 import logging
 import datetime
+import json
+import os
 from datetime import timedelta
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
@@ -10,19 +12,17 @@ _LOGGER = logging.getLogger(__name__)
 DOMAIN = "pv_smart_scheduler"
 
 async def async_setup_entry(hass: HomeAssistant, entry):
-    """Setup der Integration über die UI/Config Entry."""
-    # Hier konfigurierst du später die Entitäten (z.B. per Options Flow)
-    # Für dieses Beispiel hardcoden wir ein Test-Setup im Config-Eintrag
+    """Setup der Integration."""
     configured_devices = entry.data.get("devices", {
         "sensor.waschmaschine_power": {
-            "duration_hours": 2,
-            "target_coverage": 95,
-            "pv_forecast_sensor": "sensor.solcast_pv_forecast_4h", # Beispiel-Sensor
-            "home_base_load_sensor": "sensor.home_base_consumption"
+            "target_coverage": 90,
+            "pv_forecast_sensor": "sensor.none_prognose_heute",
+            "home_base_load_sensor": "sensor.kiwigrid_power_consumed"
         }
     })
 
     coordinator = PVSmartSchedulerCoordinator(hass, configured_devices)
+    await coordinator.async_load_learned_profiles()
     await coordinator.async_config_entry_first_refresh()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
@@ -30,7 +30,7 @@ async def async_setup_entry(hass: HomeAssistant, entry):
     return True
 
 class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
-    """Zentraler Koordinator für die Berechnung der Startzeiten."""
+    """Koordinator mit adaptiven Heuristiken."""
 
     def __init__(self, hass: HomeAssistant, devices):
         super().__init__(
@@ -40,79 +40,174 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             update_interval=timedelta(minutes=15)
         )
         self.devices = devices
+        self.learned_profiles = {}
+        self.profile_path = hass.config.path("pv_smart_scheduler_profiles.json")
+
+    async def async_load_learned_profiles(self):
+        """Lädt die gelernten Profile aus dem lokalen Speicher."""
+        def load():
+            if os.path.exists(self.profile_path):
+                try:
+                    with open(self.profile_path, "r") as f:
+                        return json.load(f)
+                except Exception as err:
+                    _LOGGER.error(f"Fehler beim Laden der Profil-Datei: {err}")
+            return {}
+        self.learned_profiles = await self.hass.async_add_executor_job(load)
+
+    def save_learned_profiles(self):
+        """Speichert die gelernten Profile lokal ab."""
+        try:
+            os.makedirs(os.path.dirname(self.profile_path), exist_ok=True)
+            with open(self.profile_path, "w") as f:
+                json.dump(self.learned_profiles, f, indent=4)
+        except Exception as err:
+            _LOGGER.error(f"Fehler beim Speichern der Profile: {err}")
 
     async def _async_update_data(self):
-        """Berechnet die Empfehlungen für alle Geräte."""
+        """Berechnet Empfehlungen basierend auf adaptiven Heuristiken."""
         results = {}
-        
+
         for entity_id, config in self.devices.items():
             try:
-                # 1. Historisches Profil berechnen (Letzte 24h als Basis)
-                profile = await self._get_historical_profile(entity_id, config["duration_hours"])
+                # Wetter-Varianz (Sicherheitsabschlag) anhand des aktuellen Sensors berechnen
+                weather_stability_factor = self._calculate_weather_stability(config["pv_forecast_sensor"])
                 
-                # 2. PV-Prognose und Basislast holen
-                forecast = self._get_pv_forecast(config["pv_forecast_sensor"])
-                base_load = float(self.hass.states.get(config["home_base_load_sensor"]).state)
+                # 1. Adaptives Profil laden oder aus Historie lernen
+                profile = await self._get_adaptive_profile(entity_id)
+                
+                # 2. PV-Prognose holen und Stabilitätsfaktor anwenden
+                raw_forecast = self._get_pv_forecast(config["pv_forecast_sensor"])
+                stable_forecast = [watt * weather_stability_factor for watt in raw_forecast]
+                
+                # Sicherer Abruf des Basis-Verbrauchs
+                base_load_state = self.hass.states.get(config["home_base_load_sensor"])
+                if base_load_state and base_load_state.state not in ("unknown", "unavailable"):
+                    base_load = max(0.0, float(base_load_state.state))
+                else:
+                    base_load = 300.0 # Sinnvoller Fallback-Wert (Haus-Grundrauschen)
+                    _LOGGER.warning(f"Basislast-Sensor {config['home_base_load_sensor']} nicht verfügbar. Nutze Fallback.")
 
-                # 3. Sliding Window Algorithmus
+                # 3. Sliding Window Berechnung
                 best_start, max_coverage = self._calculate_best_window(
-                    profile, forecast, base_load, config["target_coverage"]
+                    profile, stable_forecast, base_load
                 )
 
                 results[entity_id] = {
                     "recommendation": "ja" if max_coverage >= config["target_coverage"] and best_start == 0 else "warten",
                     "best_start_mins": best_start,
                     "coverage_percent": round(max_coverage, 1),
-                    "total_kwh": round(sum(profile) / 60, 2) # Watt-Minuten zu kWh
+                    "total_kwh": round(sum(profile) / 60000, 2), # Watt-Minuten zu kWh
+                    "weather_stability": round(weather_stability_factor * 100, 0)
                 }
             except Exception as err:
-                _LOGGER.error(f"Fehler bei Berechnung für {entity_id}: {err}")
+                _LOGGER.error(f"Kritischer Fehler bei Berechnung für {entity_id}: {err}")
                 
         return results
 
-    async def _get_historical_profile(self, entity_id, duration_hours):
-        """Holt die letzten aktiven Phasen des Sensors und baut ein Durchschnitts-Profil (in Minuten)."""
+    def _calculate_weather_stability(self, forecast_sensor_id) -> float:
+        """
+        Heuristik 1: Berechnet die Stabilität der Prognose.
+        Vergleicht den aktuellen Prognosewert mit einem statistischen Mindestwert.
+        Gibt einen Sicherheitsfaktor zwischen 0.75 und 1.0 zurück.
+        """
+        # Da wir hier primär die heutige Gesamtprognose oder den aktuellen Stundenwert erhalten:
+        # Wenn der Sensor existiert und valide ist, nutzen wir ihn als Skalierung.
+        state = self.hass.states.get(forecast_sensor_id)
+        if not state or state.state in ("unknown", "unavailable"):
+            return 0.85 # Vorsichtiger Fallback bei fehlender Prognose
+
+        # Wenn die Prognose für heute extrem niedrig ist (z.B. Winter/Regen), 
+        # erhöhen wir den Sicherheitsabschlag, da Wolkenbänder schwerer wiegen.
+        try:
+            forecast_val = float(state.state)
+            if forecast_val < 500:
+                return 0.75
+            elif forecast_val < 1500:
+                return 0.88
+        except ValueError:
+            pass
+
+        return 0.95 
+
+    async def _get_adaptive_profile(self, entity_id):
+        """
+        Heuristik 2: Holt das gelernte Profil. Wenn keins existiert, 
+        wird die HA-Historie analysiert, um einen echten Waschgang zu isolieren.
+        """
+        if entity_id in self.learned_profiles and len(self.learned_profiles[entity_id]) > 0:
+            return self.learned_profiles[entity_id]
+
+        _LOGGER.info(f"Lerne neues Profil für {entity_id} aus der Historie...")
         now = dt_util.utcnow()
-        start_time = now - timedelta(days=3) # Wir prüfen die letzten 3 Tage
+        start_time = now - timedelta(days=3)
         
-        # Aufruf der HA Recorder History (muss im Executor laufen)
         history_list = await self.hass.async_add_executor_job(
             history.get_significant_states, self.hass, start_time, now, [entity_id]
         )
 
-        # Standard-Profil falls keine Historie (z.B. 120 Minuten mit 400W im Schnitt)
-        duration_mins = int(duration_hours * 60)
-        default_profile = [400] * duration_mins
+        # Standardprofil (120 Min, 300W im Schnitt) als absolut sicherer Fallback
+        default_profile = [300] * 120
 
-        if entity_id not in history_list:
+        if entity_id not in history_list or not history_list[entity_id]:
             return default_profile
 
         states = history_list[entity_id]
-        # Einfache Heuristik: Finde die letzte Phase, bei der die Leistung > 10W war
-        # Für eine präzise Kurve kann man hier die Werte in ein minütliches Raster interpolieren
-        # Aus Gründen der Übersichtlichkeit nutzen wir hier ein geglättetes Profil:
+        
+        # Heuristik zur Extraktion eines Verbrauchs-Profils:
+        active_phase = []
+        for state in states:
+            try:
+                if state.state in ("unknown", "unavailable"):
+                    continue
+                val = float(state.state)
+                if val > 15: # Gerät läuft (Schwellenwert 15 Watt)
+                    active_phase.append(val)
+                elif len(active_phase) > 45: 
+                    # Wenn das Gerät danach stoppt und wir aufgezeichnet haben -> Fertig
+                    break
+                else:
+                    active_phase = [] # Zu kurzer Peak (z.B. Standby), verwerfen
+            except (ValueError, TypeError):
+                continue
+
+        if len(active_phase) > 30:
+            self.learned_profiles[entity_id] = active_phase
+            await self.hass.async_add_executor_job(self.save_learned_profiles)
+            _LOGGER.info(f"Profil für {entity_id} erfolgreich gelernt. Länge: {len(active_phase)} Min.")
+            return active_phase
+
         return default_profile
 
     def _get_pv_forecast(self, forecast_sensor_id):
-        """Holt die stündliche/minütliche Prognose. Gibt eine Liste von Watt-Werten pro Minute für die nächsten 4h zurück."""
-        # Das hängt stark von deinem Prognose-Sensor ab (z.B. Solcast Attribut 'forecast')
-        # Hier simulieren wir eine abfallende/steigende Kurve basierend auf dem aktuellen Zustand
+        """Holt die Prognose-Werte (generiert eine 240-Minuten-Kurve basierend auf dem Sensor)."""
         state = self.hass.states.get(forecast_sensor_id)
-        current_forecast = float(state.state) if state else 1000.0
         
-        # Erzeuge 240 Minuten-Werte (4 Stunden)
-        return [max(0, current_forecast - (i * 2)) for i in range(240)]
+        if state and state.state not in ("unknown", "unavailable"):
+            try:
+                current_forecast = float(state.state)
+            except ValueError:
+                current_forecast = 1200.0
+        else:
+            current_forecast = 1200.0
 
-    def _calculate_best_window(self, profile, forecast, base_load, target_coverage):
-        """Der mathematische Kern: Verschiebe das Profil über die Prognose (Sliding Window)."""
+        # Generiert eine abfallende Kurve für die nächsten 4 Stunden (240 Minuten Raster)
+        return [max(0, current_forecast - (i * 3)) for i in range(240)]
+
+    def _calculate_best_window(self, profile, forecast, base_load):
+        """Sliding Window Kernalgorithmus."""
         profile_len = len(profile)
         forecast_len = len(forecast)
         
         best_start_minute = 0
         max_coverage_found = 0.0
 
-        # Verschiebe den Startzeitpunkt im Minutenraster
-        for start_min in range(0, forecast_len - profile_len, 15): # 15-Minuten-Schritte für Performance
+        # Wenn das Profil länger als unsere Prognose ist, kürzen wir die Berechnung ab
+        if profile_len >= forecast_len:
+            return 0, 0.0
+
+        # 15-Minuten Schritte für hervorragende Performance im Logik-Loop
+        for start_min in range(0, forecast_len - profile_len, 15):
             total_device_energy = 0
             covered_by_pv_energy = 0
 
@@ -120,7 +215,6 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                 device_power = profile[t]
                 forecast_power = forecast[start_min + t]
                 
-                # Verfügbarer Überschuss in dieser Minute
                 available_excess = max(0, forecast_power - base_load)
                 
                 total_device_energy += device_power
