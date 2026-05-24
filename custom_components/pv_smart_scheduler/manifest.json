@@ -1,0 +1,9 @@
+{
+  "domain": "pv_smart_scheduler",
+  "name": "PV Smart Scheduler",
+  "codeowners": [],
+  "dependencies": ["recorder"],
+  "documentation": "https://github.com/sniper_wcw/pv_smart_scheduler",
+  "iot_class": "local_polling",
+  "version": "1.0.0"
+}
