@@ -4,9 +4,9 @@ import json
 import os
 from datetime import timedelta
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import entry_health
-from homeassistant.util import dt as dt_util
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.components.recorder import history
+from homeassistant.util import dt as dt_util
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -85,6 +85,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                 raw_forecast = self._get_pv_forecast(config["pv_forecast_sensor"])
                 stable_forecast = [watt * weather_stability_factor for watt in raw_forecast]
                 
+                # HIER KORRIGIERT: Richtige Zuweisung des Status-Objekts
                 base_load_state = self.hass.states.get(config["home_base_load_sensor"])
                 if base_load_state and base_load_state.state not in ("unknown", "unavailable"):
                     base_load = max(0.0, float(base_load_state.state))
@@ -96,7 +97,6 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                     profile, stable_forecast, base_load
                 )
 
-                # Annäherung: Wenn die Liste z.B. 120 Einträge hat, gehen wir von ca. 120 Minuten aus
                 avg_watts = sum(profile) / len(profile) if profile else 0
                 estimated_hours = len(profile) / 60
                 total_kwh = (avg_watts * estimated_hours) / 1000
@@ -168,7 +168,8 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         return default_profile
 
     def _get_pv_forecast(self, forecast_sensor_id):
-        state = self.hass.states.get(forecast_forecast_id := forecast_sensor_id)
+        # HIER KORRIGIERT: Einfacher, sicherer Aufruf ohne Walrus-Operator
+        state = self.hass.states.get(forecast_sensor_id)
         if state and state.state not in ("unknown", "unavailable"):
             try:
                 current_forecast = float(state.state)
