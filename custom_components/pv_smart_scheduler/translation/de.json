@@ -1,0 +1,31 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "PV Smart Scheduler: Gerät hinzufügen",
+        "description": "Richte ein neues Haushaltsgerät für die PV-Startoptimierung ein. Höhere Prioritäten (z.B. 1) reservieren den Solarstrom vor nachgelagerten Geräten.",
+        "data": {
+          "device_power_sensor": "Geräte-Leistungssensor (Aktueller Verbrauch in W)",
+          "pv_forecast_sensor": "PV-Prognosesensor (Aktuelle Vorhersage in W)",
+          "home_base_load_sensor": "Haus-Basislast (Grundverbrauch in W)",
+          "target_coverage": "Gewünschte PV-Abdeckung (in %)",
+          "priority": "Priorität (1 = Höchste, 2 = Zweithöchste, etc.)"
+        }
+      }
+    },
+    "options": {
+      "step": {
+        "init": {
+          "title": "PV Smart Scheduler: Konfiguration anpassen",
+          "data": {
+            "device_power_sensor": "Geräte-Leistungssensor (Aktueller Verbrauch in W)",
+            "pv_forecast_sensor": "PV-Prognosesensor (Aktuelle Vorhersage in W)",
+            "home_base_load_sensor": "Haus-Basislast (Grundverbrauch in W)",
+            "target_coverage": "Gewünschte PV-Abdeckung (in %)",
+            "priority": "Priorität (1 = Höchste, 2 = Zweithöchste, etc.)"
+          }
+        }
+      }
+    }
+  }
+}
