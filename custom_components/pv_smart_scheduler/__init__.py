@@ -13,6 +13,7 @@ from homeassistant.components.http import StaticPathConfig
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+PROFILE_LOOKBACK_DAYS = 14
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Wird beim allgemeinen Starten von Home Assistant aufgerufen."""
@@ -81,7 +82,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         )
         self.devices_config = {}
         self.learned_profiles = {}
-        self.profile_path = hass.config.path("pv_smart_scheduler_profiles_v2.json")
+        self.profile_path = hass.config.path("pv_smart_scheduler_profiles_v3.json")
 
     async def async_refresh_devices_config(self):
         new_config = {}
@@ -190,7 +191,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
 
         now = dt_util.utcnow()
         history_list = await self.hass.async_add_executor_job(
-            history.get_significant_states, self.hass, now - timedelta(days=3), now, [entity_id]
+            history.get_significant_states, self.hass, now - timedelta(days=PROFILE_LOOKBACK_DAYS), now, [entity_id]
         )
         default_profile = [300] * 120
         if entity_id not in history_list or not history_list[entity_id]:

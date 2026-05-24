@@ -1,4 +1,5 @@
 import logging
+import re
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.core import HomeAssistant
@@ -58,11 +59,7 @@ class PVSmartSchedulerMasterSensor(
         for entity_id, data in sorted_devices:
 
             state = self.hass.states.get(entity_id)
-
-            friendly_name = (
-                state.attributes.get("friendly_name")
-                if state else entity_id
-            )
+            friendly_name = self._device_display_name(entity_id, state)
 
             devices.append({
                 "name": friendly_name,
@@ -88,3 +85,19 @@ class PVSmartSchedulerMasterSensor(
             "devices": devices,
             "device_count": len(devices)
         }
+
+    def _device_display_name(self, entity_id, state):
+        if state:
+            friendly_name = state.attributes.get("friendly_name") or getattr(state, "name", None)
+            if friendly_name and friendly_name != entity_id and not friendly_name.startswith("sensor."):
+                return self._clean_device_name(friendly_name)
+
+        return self._clean_device_name(entity_id)
+
+    def _clean_device_name(self, name):
+        name = name.split(".", 1)[-1]
+        name = name.replace("_", " ").replace("-", " ").strip()
+        name = re.sub(r"\b(current power|aktuelle leistung|power|leistung)\b", "", name, flags=re.IGNORECASE)
+        name = re.sub(r"\s+", " ", name).strip()
+
+        return name.title() if name else "Gerät"
