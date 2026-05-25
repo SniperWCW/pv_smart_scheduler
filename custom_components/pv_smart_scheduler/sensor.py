@@ -97,6 +97,8 @@ class PVSmartSchedulerMasterSensor(
             "battery_available_kwh": context.get("battery_available_kwh"),
             "battery_min_soc": context.get("battery_min_soc"),
             "profile_lookback_days": context.get("profile_lookback_days"),
+            "configured_device_count": context.get("configured_device_count"),
+            "unique_device_count": context.get("unique_device_count"),
             "forecast_source_unit": context.get("forecast_source_unit"),
             "forecast_remaining_kwh": context.get("forecast_remaining_kwh"),
             "forecast_average_power": context.get("forecast_average_power")
@@ -113,7 +115,14 @@ class PVSmartSchedulerMasterSensor(
     def _clean_device_name(self, name):
         name = name.split(".", 1)[-1]
         name = name.replace("_", " ").replace("-", " ").strip()
-        name = re.sub(r"\b(current power|aktuelle leistung|power|leistung)\b", "", name, flags=re.IGNORECASE)
+        name = re.sub(
+            r"\b(current power|current consumption|aktuelle leistung|aktueller verbrauch|"
+            r"derzeitige leistung|derzeitiger verbrauch|momentane leistung|"
+            r"momentaner verbrauch|power|leistung|verbrauch)\b",
+            "",
+            name,
+            flags=re.IGNORECASE
+        )
         name = re.sub(r"\s+", " ", name).strip()
 
         return name.title() if name else "Gerät"

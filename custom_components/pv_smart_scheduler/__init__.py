@@ -49,8 +49,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await coordinator.async_config_entry_first_refresh()
     else:
         coordinator = hass.data[DOMAIN]["global_coordinator"]
-        # Bei weiteren Instanzen reicht ein Refresh der Konfiguration
         await coordinator.async_refresh_devices_config()
+        await coordinator.async_refresh()
 
     await hass.config_entries.async_forward_entry_setups(entry, ["sensor"])
     return True
@@ -70,6 +70,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator = hass.data[DOMAIN].get("global_coordinator")
         if coordinator:
             await coordinator.async_refresh_devices_config()
+            await coordinator.async_refresh()
     return unload_ok
 
 
@@ -84,12 +85,15 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             update_interval=timedelta(minutes=15)
         )
         self.devices_config = {}
+        self.configured_device_count = 0
+        self.unique_device_count = 0
         self.learned_profiles = {}
         self.last_context = {}
         self.profile_path = hass.config.path("pv_smart_scheduler_profiles_v3.json")
 
     async def async_refresh_devices_config(self):
         new_config = {}
+        configured_device_count = 0
         for entry in self.hass.config_entries.async_entries(DOMAIN):
             value = {**entry.data, **entry.options}
             devices = entry.data.get("devices", [])
@@ -99,6 +103,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                 entity_id = device.get("device_power_sensor")
 
                 if entity_id:
+                    configured_device_count += 1
                     new_config[entity_id] = {
                         "target_coverage":
                             device.get("target_coverage", 90),
@@ -125,6 +130,8 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                             value.get("battery_min_soc", DEFAULT_BATTERY_MIN_SOC)
                     }
         self.devices_config = new_config
+        self.configured_device_count = configured_device_count
+        self.unique_device_count = len(new_config)
         await self.async_load_learned_profiles()
 
     async def async_load_learned_profiles(self):
@@ -148,6 +155,11 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         results = {}
         if not self.devices_config:
+            self.last_context = {
+                "profile_lookback_days": PROFILE_LOOKBACK_DAYS,
+                "configured_device_count": self.configured_device_count,
+                "unique_device_count": self.unique_device_count
+            }
             return results
 
         sorted_devices = sorted(self.devices_config.items(), key=lambda x: x[1]["priority"])
@@ -176,6 +188,8 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             "battery_available_kwh": round(battery_available_wh / 1000, 2),
             "battery_min_soc": battery_min_soc,
             "profile_lookback_days": PROFILE_LOOKBACK_DAYS,
+            "configured_device_count": self.configured_device_count,
+            "unique_device_count": self.unique_device_count,
             **forecast_context
         }
 
