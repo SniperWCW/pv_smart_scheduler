@@ -88,40 +88,40 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
 
     async def async_refresh_devices_config(self):
         new_config = {}
-        for key, value in self.hass.data[DOMAIN].items():
-            if key != "global_coordinator" and isinstance(value, dict):
-                devices = value.get("devices", [])
+        for entry in self.hass.config_entries.async_entries(DOMAIN):
+            value = {**entry.data, **entry.options}
+            devices = entry.data.get("devices", [])
 
-                for device in devices:
+            for device in devices:
 
-                    entity_id = device.get("device_power_sensor")
+                entity_id = device.get("device_power_sensor")
 
-                    if entity_id:
-                        new_config[entity_id] = {
-                            "target_coverage":
-                                device.get("target_coverage", 90),
+                if entity_id:
+                    new_config[entity_id] = {
+                        "target_coverage":
+                            device.get("target_coverage", 90),
 
-                            "priority":
-                                device.get("priority", 1),
+                        "priority":
+                            device.get("priority", 1),
 
-                            "pv_forecast_sensor":
-                                value.get("pv_forecast_sensor"),
+                        "pv_forecast_sensor":
+                            value.get("pv_forecast_sensor"),
 
-                            "home_base_load_sensor":
-                                value.get("home_base_load_sensor"),
+                        "home_base_load_sensor":
+                            value.get("home_base_load_sensor"),
 
-                            "pv_current_power_sensor":
-                                value.get("pv_current_power_sensor"),
+                        "pv_current_power_sensor":
+                            value.get("pv_current_power_sensor"),
 
-                            "battery_soc_sensor":
-                                value.get("battery_soc_sensor"),
+                        "battery_soc_sensor":
+                            value.get("battery_soc_sensor"),
 
-                            "battery_energy_sensor":
-                                value.get("battery_energy_sensor"),
+                        "battery_energy_sensor":
+                            value.get("battery_energy_sensor"),
 
-                            "battery_min_soc":
-                                value.get("battery_min_soc", DEFAULT_BATTERY_MIN_SOC)
-                        }
+                        "battery_min_soc":
+                            value.get("battery_min_soc", DEFAULT_BATTERY_MIN_SOC)
+                    }
         self.devices_config = new_config
         await self.async_load_learned_profiles()
 

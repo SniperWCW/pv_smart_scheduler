@@ -272,7 +272,7 @@ class PVSmartSchedulerOptionsFlowHandler(
 ):
 
     def __init__(self, config_entry):
-        self.config_entry = config_entry
+        self._config_entry = config_entry
 
     async def async_step_init(
         self,
@@ -293,8 +293,8 @@ class PVSmartSchedulerOptionsFlowHandler(
 
     def _build_options_schema(self):
         data = {
-            **self.config_entry.data,
-            **self.config_entry.options
+            **self._config_entry.data,
+            **self._config_entry.options
         }
 
         return vol.Schema({
