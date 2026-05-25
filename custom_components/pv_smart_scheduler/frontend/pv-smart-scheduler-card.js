@@ -37,6 +37,7 @@ class PVSmartSchedulerCard extends HTMLElement {
     } else {
       devices.forEach((device) => {
         const isReady = device.recommendation === 'ja';
+        const isRunning = device.is_running || device.recommendation === 'läuft';
         const startMins = this.getFirstNumber(
           device,
           ['best_start_mins', 'best_start_minutes', 'start_in_mins'],
@@ -53,13 +54,15 @@ class PVSmartSchedulerCard extends HTMLElement {
           0
         );
 
-        const bestStartDisplay =
-          isReady && startMins === 0
-            ? 'Sofort'
-            : startMins > 0
-              ? `In ${startMins} Min`
-              : 'Warten';
-        const statusColor = isReady ? '#4caf50' : '#ff9800';
+        let bestStartDisplay = 'Warten';
+        if (isRunning) {
+          bestStartDisplay = 'Läuft bereits';
+        } else if (isReady && startMins === 0) {
+          bestStartDisplay = 'Sofort';
+        } else if (startMins > 0) {
+          bestStartDisplay = `In ${startMins} Min`;
+        }
+        const statusColor = isRunning ? '#2196f3' : (isReady ? '#4caf50' : '#ff9800');
         const icon = this.getDeviceIcon(device.name || '');
         const name = this.escapeHtml(device.name || 'Gerät');
         const prio = device.priority !== undefined && device.priority !== null ? device.priority : '-';
@@ -69,7 +72,7 @@ class PVSmartSchedulerCard extends HTMLElement {
             <td style="padding: 10px 4px; font-weight: bold; color: var(--secondary-text-color);">#${prio}</td>
             <td style="padding: 10px 4px; font-weight: 500;">
               <div style="display: flex; align-items: center; gap: 8px;">
-                <ha-icon icon="${icon}" style="color: ${isReady ? 'var(--success-color, #4caf50)' : 'var(--primary-text-color)'}; --mdc-icon-size: 18px;"></ha-icon>
+                <ha-icon icon="${icon}" style="color: ${isRunning ? '#2196f3' : (isReady ? 'var(--success-color, #4caf50)' : 'var(--primary-text-color)')}; --mdc-icon-size: 18px;"></ha-icon>
                 <span>${name}</span>
               </div>
             </td>
@@ -78,7 +81,7 @@ class PVSmartSchedulerCard extends HTMLElement {
                 ${bestStartDisplay}
               </span>
             </td>
-            <td style="padding: 10px 4px; text-align: right; font-weight: bold; color: ${isReady ? 'var(--success-color, #4caf50)' : 'var(--primary-text-color)'};">
+            <td style="padding: 10px 4px; text-align: right; font-weight: bold; color: ${isRunning ? '#2196f3' : (isReady ? 'var(--success-color, #4caf50)' : 'var(--primary-text-color)')};">
               ${this.formatNumber(pvCoverage, 1)}%
               <div style="font-size: 10px; font-weight: normal; color: var(--secondary-text-color);">${this.formatNumber(estimatedKwh, 2)} kWh</div>
             </td>

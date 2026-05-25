@@ -15,6 +15,8 @@ from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 PROFILE_LOOKBACK_DAYS = 14
 DEFAULT_BATTERY_MIN_SOC = 25
+DEVICE_ACTIVE_POWER_THRESHOLD = 15
+FORECAST_HORIZON_MINUTES = 240
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Wird beim allgemeinen Starten von Home Assistant aufgerufen."""
@@ -150,7 +152,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
 
         sorted_devices = sorted(self.devices_config.items(), key=lambda x: x[1]["priority"])
         first_config = sorted_devices[0][1]
-        raw_forecast = self._get_pv_forecast(first_config["pv_forecast_sensor"])
+        raw_forecast, forecast_context = self._get_pv_forecast(first_config["pv_forecast_sensor"])
         weather_stability = self._calculate_weather_stability(first_config["pv_forecast_sensor"])
         current_pv_power = self._get_float_state(first_config.get("pv_current_power_sensor"), 0.0)
         battery_soc = self._get_float_state(first_config.get("battery_soc_sensor"))
@@ -173,12 +175,15 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             "battery_soc": round(battery_soc, 1) if battery_soc is not None else None,
             "battery_available_kwh": round(battery_available_wh / 1000, 2),
             "battery_min_soc": battery_min_soc,
-            "profile_lookback_days": PROFILE_LOOKBACK_DAYS
+            "profile_lookback_days": PROFILE_LOOKBACK_DAYS,
+            **forecast_context
         }
 
         for entity_id, config in sorted_devices:
             try:
                 profile = await self._get_adaptive_profile(entity_id)
+                current_device_power = self._get_float_state(entity_id, 0.0)
+                is_running = current_device_power > DEVICE_ACTIVE_POWER_THRESHOLD
                 base_load_state = self.hass.states.get(config["home_base_load_sensor"])
                 base_load = max(0.0, float(base_load_state.state)) if base_load_state and base_load_state.state not in ("unknown", "unavailable") else 300.0
 
@@ -186,12 +191,14 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                     profile, virtual_pv_forecast, base_load, remaining_battery_wh
                 )
 
-                recommendation = "ja" if max_coverage >= config["target_coverage"] and best_start == 0 else "warten"
+                recommendation = "läuft" if is_running else ("ja" if max_coverage >= config["target_coverage"] and best_start == 0 else "warten")
                 avg_watts = sum(profile) / len(profile) if profile else 0
                 total_kwh = (avg_watts * (len(profile) / 60)) / 1000
 
                 results[entity_id] = {
                     "recommendation": recommendation,
+                    "is_running": is_running,
+                    "current_power": round(current_device_power, 1),
                     "best_start_mins": best_start,
                     "coverage_percent": round(max_coverage, 1),
                     "total_kwh": round(total_kwh, 2),
@@ -200,7 +207,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                     "priority": config["priority"]
                 }
 
-                if recommendation == "ja" and best_start == 0:
+                if recommendation in ("ja", "läuft") and best_start == 0:
                     profile_len = len(profile)
                     for i in range(min(profile_len, len(virtual_pv_forecast))):
                         virtual_pv_forecast[i] = max(0.0, virtual_pv_forecast[i] - profile[i])
@@ -216,6 +223,19 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         state = self.hass.states.get(forecast_sensor_id)
         if not state or state.state in ("unknown", "unavailable"):
             return 0.85
+
+        unit = state.attributes.get("unit_of_measurement")
+        if unit and unit.lower() in ("kwh", "kw h"):
+            try:
+                estimate = float(state.attributes.get("estimate", state.state))
+                estimate10 = float(state.attributes.get("estimate10", estimate))
+                if estimate > 0:
+                    return max(0.5, min(1.0, estimate10 / estimate))
+            except (TypeError, ValueError):
+                return 0.9
+
+            return 0.9
+
         try:
             val = float(state.state)
             return 0.75 if val < 500 else (0.88 if val < 1500 else 0.95)
@@ -252,11 +272,41 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
 
     def _get_pv_forecast(self, forecast_sensor_id):
         state = self.hass.states.get(forecast_sensor_id)
-        current_forecast = 1200.0
-        if state and state.state not in ("unknown", "unavailable"):
-            try: current_forecast = float(state.state)
-            except ValueError: pass
-        return [max(0, current_forecast - (i * 3)) for i in range(240)]
+        context = {
+            "forecast_source_unit": None,
+            "forecast_remaining_kwh": None,
+            "forecast_average_power": None
+        }
+
+        if not state or state.state in ("unknown", "unavailable"):
+            return [1200.0] * FORECAST_HORIZON_MINUTES, context
+
+        unit = state.attributes.get("unit_of_measurement")
+        context["forecast_source_unit"] = unit
+
+        try:
+            forecast_value = float(state.attributes.get("estimate", state.state))
+        except (TypeError, ValueError):
+            forecast_value = 1200.0
+
+        if unit and unit.lower() in ("kwh", "kw h"):
+            remaining_minutes = self._remaining_daylight_minutes()
+            average_power = (forecast_value * 1000) / (remaining_minutes / 60)
+            context["forecast_remaining_kwh"] = round(forecast_value, 3)
+            context["forecast_average_power"] = round(average_power, 1)
+            return [max(0.0, average_power) for _ in range(FORECAST_HORIZON_MINUTES)], context
+
+        context["forecast_average_power"] = round(forecast_value, 1)
+        return [max(0, forecast_value - (i * 3)) for i in range(FORECAST_HORIZON_MINUTES)], context
+
+    def _remaining_daylight_minutes(self):
+        now = dt_util.now()
+        end_of_day = now.replace(hour=21, minute=0, second=0, microsecond=0)
+
+        if now >= end_of_day:
+            return 60
+
+        return max(60, min(720, int((end_of_day - now).total_seconds() / 60)))
 
     def _get_float_state(self, entity_id, fallback=None):
         if not entity_id:

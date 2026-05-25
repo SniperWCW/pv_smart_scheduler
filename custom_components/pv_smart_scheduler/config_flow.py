@@ -274,10 +274,16 @@ class PVSmartSchedulerOptionsFlowHandler(
     def __init__(self, config_entry):
         self._config_entry = config_entry
 
-    async def async_step_init(
-        self,
-        user_input=None
-    ):
+    async def async_step_init(self, user_input=None):
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=[
+                "global_sensors",
+                "remove_device"
+            ]
+        )
+
+    async def async_step_global_sensors(self, user_input=None):
 
         if user_input is not None:
 
@@ -287,8 +293,47 @@ class PVSmartSchedulerOptionsFlowHandler(
             )
 
         return self.async_show_form(
-            step_id="init",
+            step_id="global_sensors",
             data_schema=self._build_options_schema()
+        )
+
+    async def async_step_remove_device(self, user_input=None):
+        devices = self._config_entry.data.get("devices", [])
+
+        if user_input is not None:
+            remove_entity_id = user_input["device_power_sensor"]
+            new_devices = [
+                device for device in devices
+                if device.get("device_power_sensor") != remove_entity_id
+            ]
+
+            self.hass.config_entries.async_update_entry(
+                self._config_entry,
+                data={
+                    **self._config_entry.data,
+                    "devices": new_devices
+                }
+            )
+
+            return self.async_create_entry(
+                title="",
+                data=dict(self._config_entry.options)
+            )
+
+        if not devices:
+            return self.async_abort(reason="no_devices")
+
+        device_options = {
+            device["device_power_sensor"]: self._device_label(device["device_power_sensor"])
+            for device in devices
+            if device.get("device_power_sensor")
+        }
+
+        return self.async_show_form(
+            step_id="remove_device",
+            data_schema=vol.Schema({
+                vol.Required("device_power_sensor"): vol.In(device_options)
+            })
         )
 
     def _build_options_schema(self):
@@ -355,3 +400,10 @@ class PVSmartSchedulerOptionsFlowHandler(
                 vol.Range(min=0, max=100)
             )
         })
+
+    def _device_label(self, entity_id):
+        state = self.hass.states.get(entity_id)
+        if state:
+            return state.attributes.get("friendly_name") or entity_id
+
+        return entity_id

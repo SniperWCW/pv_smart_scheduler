@@ -30,12 +30,19 @@
     },
     "abort": {
       "device_added": "Gerät wurde hinzugefügt.",
+      "no_devices": "Es sind keine Geräte zum Löschen konfiguriert.",
       "reconfigured": "Konfiguration wurde aktualisiert."
     }
   },
   "options": {
-    "step": {
+    "menu": {
       "init": {
+        "global_sensors": "Globale Sensoren ändern",
+        "remove_device": "Einzelnes Gerät löschen"
+      }
+    },
+    "step": {
+      "global_sensors": {
         "title": "PV Smart Scheduler: Globale Sensoren anpassen",
         "description": "Passe die globalen Sensoren für PV, Hausverbrauch und Batterie an. Die bereits konfigurierten Geräte bleiben erhalten.",
         "data": {
@@ -53,6 +60,16 @@
           "battery_soc_sensor": "Optionaler Batterie-Ladestand in Prozent.",
           "battery_energy_sensor": "Optional verfügbare Batterie-Energie in kWh.",
           "battery_min_soc": "Unterhalb dieses Ladestands wird die Batterie nicht für Gerätestarts eingeplant."
+        }
+      },
+      "remove_device": {
+        "title": "PV Smart Scheduler: Gerät löschen",
+        "description": "Wähle ein Gerät aus, das aus der Scheduler-Konfiguration entfernt werden soll.",
+        "data": {
+          "device_power_sensor": "Zu löschendes Gerät"
+        },
+        "data_description": {
+          "device_power_sensor": "Nur dieses Gerät wird entfernt. Die globalen PV-, Hausverbrauch- und Batterie-Sensoren bleiben erhalten."
         }
       }
     }

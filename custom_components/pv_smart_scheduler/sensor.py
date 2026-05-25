@@ -66,6 +66,8 @@ class PVSmartSchedulerMasterSensor(
                 "entity_id": entity_id,
                 "priority": data.get("priority", 1),
                 "recommendation": data.get("recommendation"),
+                "is_running": data.get("is_running", False),
+                "current_power": data.get("current_power", 0),
                 "best_start_mins": data.get("best_start_mins", 0),
                 "pv_coverage": round(
                     data.get("coverage_percent", 0),
@@ -94,7 +96,10 @@ class PVSmartSchedulerMasterSensor(
             "battery_soc": context.get("battery_soc"),
             "battery_available_kwh": context.get("battery_available_kwh"),
             "battery_min_soc": context.get("battery_min_soc"),
-            "profile_lookback_days": context.get("profile_lookback_days")
+            "profile_lookback_days": context.get("profile_lookback_days"),
+            "forecast_source_unit": context.get("forecast_source_unit"),
+            "forecast_remaining_kwh": context.get("forecast_remaining_kwh"),
+            "forecast_average_power": context.get("forecast_average_power")
         }
 
     def _device_display_name(self, entity_id, state):
