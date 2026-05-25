@@ -35,13 +35,13 @@
     }
   },
   "options": {
-    "menu": {
-      "init": {
-        "global_sensors": "Globale Sensoren ändern",
-        "remove_device": "Einzelnes Gerät löschen"
-      }
-    },
     "step": {
+      "init": {
+        "menu_options": {
+          "global_sensors": "Globale Sensoren ändern",
+          "remove_device": "Einzelnes Gerät löschen"
+        }
+      },
       "global_sensors": {
         "title": "PV Smart Scheduler: Globale Sensoren anpassen",
         "description": "Passe die globalen Sensoren für PV, Hausverbrauch und Batterie an. Die bereits konfigurierten Geräte bleiben erhalten.",
