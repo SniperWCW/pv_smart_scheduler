@@ -75,15 +75,26 @@ class PVSmartSchedulerMasterSensor(
                     data.get("total_kwh", 0),
                     2
                 ),
+                "battery_used_kwh": round(
+                    data.get("battery_used_kwh", 0),
+                    2
+                ),
                 "weather_confidence": round(
                     data.get("weather_stability", 0),
                     0
                 )
             })
 
+        context = self.coordinator.last_context or {}
+
         return {
             "devices": devices,
-            "device_count": len(devices)
+            "device_count": len(devices),
+            "pv_current_power": context.get("pv_current_power"),
+            "battery_soc": context.get("battery_soc"),
+            "battery_available_kwh": context.get("battery_available_kwh"),
+            "battery_min_soc": context.get("battery_min_soc"),
+            "profile_lookback_days": context.get("profile_lookback_days")
         }
 
     def _device_display_name(self, entity_id, state):

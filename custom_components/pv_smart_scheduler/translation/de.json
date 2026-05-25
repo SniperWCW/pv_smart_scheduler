@@ -5,11 +5,15 @@
         "title": "PV Smart Scheduler: Gerät hinzufügen",
         "description": "Richte ein neues Haushaltsgerät für die PV-Startoptimierung ein. Höhere Prioritäten (z.B. 1) reservieren den Solarstrom vor nachgelagerten Geräten.",
         "data": {
-          "device_power_sensor": "Geräte-Leistungssensor (Aktueller Verbrauch in W)",
-          "pv_forecast_sensor": "PV-Prognosesensor (Aktuelle Vorhersage in W)",
+          "device_power_sensor": "Geräte-Leistungssensor (aktueller Verbrauch in W)",
+          "pv_forecast_sensor": "PV-Prognosesensor (Vorhersage in W)",
+          "pv_current_power_sensor": "Aktuelle PV-Leistung (Produktion in W, optional)",
           "home_base_load_sensor": "Haus-Basislast (Grundverbrauch in W)",
+          "battery_soc_sensor": "Batterie-SoC (%, optional)",
+          "battery_energy_sensor": "Verfügbare Batterie-Energie (kWh, optional)",
+          "battery_min_soc": "Mindest-SoC für Batterie-Nutzung (%)",
           "target_coverage": "Gewünschte PV-Abdeckung (in %)",
-          "priority": "Priorität (1 = Höchste, 2 = Zweithöchste, etc.)"
+          "priority": "Priorität (1 = höchste, 2 = zweithöchste, etc.)"
         }
       }
     },
@@ -18,11 +22,15 @@
         "init": {
           "title": "PV Smart Scheduler: Konfiguration anpassen",
           "data": {
-            "device_power_sensor": "Geräte-Leistungssensor (Aktueller Verbrauch in W)",
-            "pv_forecast_sensor": "PV-Prognosesensor (Aktuelle Vorhersage in W)",
+            "device_power_sensor": "Geräte-Leistungssensor (aktueller Verbrauch in W)",
+            "pv_forecast_sensor": "PV-Prognosesensor (Vorhersage in W)",
+            "pv_current_power_sensor": "Aktuelle PV-Leistung (Produktion in W, optional)",
             "home_base_load_sensor": "Haus-Basislast (Grundverbrauch in W)",
+            "battery_soc_sensor": "Batterie-SoC (%, optional)",
+            "battery_energy_sensor": "Verfügbare Batterie-Energie (kWh, optional)",
+            "battery_min_soc": "Mindest-SoC für Batterie-Nutzung (%)",
             "target_coverage": "Gewünschte PV-Abdeckung (in %)",
-            "priority": "Priorität (1 = Höchste, 2 = Zweithöchste, etc.)"
+            "priority": "Priorität (1 = höchste, 2 = zweithöchste, etc.)"
           }
         }
       }
