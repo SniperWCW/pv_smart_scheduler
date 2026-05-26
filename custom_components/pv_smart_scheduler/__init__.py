@@ -82,7 +82,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             hass, 
             _LOGGER, 
             name=DOMAIN, 
-            update_interval=timedelta(minutes=15)
+            update_interval=timedelta(minutes=1)
         )
         self.devices_config = {}
         self.configured_device_count = 0
@@ -382,7 +382,9 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             return fallback
 
         try:
-            return float(state.state)
+            # Ersetzt Komma durch Punkt für deutsche Lokalisierung und wandelt in Float um
+            val = state.state.replace(",", ".")
+            return float(val)
         except (TypeError, ValueError):
             return fallback
 
