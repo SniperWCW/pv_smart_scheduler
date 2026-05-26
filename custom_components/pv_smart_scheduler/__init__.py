@@ -152,6 +152,36 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.error(f"Fehler beim Speichern der Profile: {err}")
 
+    def _parse_state_value(self, state):
+        """Extrahiert einen Float-Wert aus einem State-Objekt unter Berücksichtigung von Einheiten."""
+        if not state or state.state in ("unknown", "unavailable", ""):
+            return None
+        try:
+            # Säubere den String: Nimm nur den ersten Teil (falls Einheiten wie "W" folgen)
+            raw_val = str(state.state).strip()
+            val_str = raw_val.split()[0]
+
+            # Tausender-Trennzeichen und Dezimal-Trenner robust handhaben
+            if "," in val_str and "." in val_str:
+                # Wenn beides da ist, ist der letzte meist der Dezimaltrenner
+                if val_str.rfind(",") > val_str.rfind("."):
+                    # Deutsch/EU: 1.234,56 -> 1234.56
+                    val_str = val_str.replace(".", "").replace(",", ".")
+                else:
+                    # US: 1,234.56 -> 1234.56
+                    val_str = val_str.replace(",", "")
+            else:
+                # Nur ein Trenner vorhanden -> Einfach Komma durch Punkt ersetzen
+                val_str = val_str.replace(",", ".")
+
+            val = float(val_str)
+            unit = state.attributes.get("unit_of_measurement")
+            if unit and unit.strip().lower() == "kw":
+                val *= 1000.0
+            return val
+        except (TypeError, ValueError, IndexError):
+            return None
+
     async def _async_update_data(self):
         results = {}
         if not self.devices_config:
@@ -208,7 +238,8 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         for entity_id, config in sorted_devices:
             try:
                 profile = await self._get_adaptive_profile(entity_id)
-                current_device_power = self._get_float_state(entity_id, 0.0)
+                state = self.hass.states.get(entity_id)
+                current_device_power = self._parse_state_value(state) or 0.0
                 is_running = current_device_power > DEVICE_ACTIVE_POWER_THRESHOLD
 
                 best_start, max_coverage, battery_used_wh = self._calculate_best_window(
@@ -284,12 +315,10 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         # 1. Finde den letzten Zeitpunkt, an dem das Gerät aktiv war (> THRESHOLD)
         last_active_idx = -1
         for i in range(len(states) - 1, -1, -1):
-            try:
-                if float(states[i].state) > DEVICE_ACTIVE_POWER_THRESHOLD:
-                    last_active_idx = i
-                    break
-            except (ValueError, TypeError):
-                continue
+            val = self._parse_state_value(states[i])
+            if val is not None and val > DEVICE_ACTIVE_POWER_THRESHOLD:
+                last_active_idx = i
+                break
 
         if last_active_idx == -1:
             return default_profile
@@ -323,10 +352,8 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                    states[current_state_ptr + 1].last_changed <= check_time):
                 current_state_ptr += 1
             
-            try:
-                resampled_profile.append(float(states[current_state_ptr].state))
-            except:
-                resampled_profile.append(0.0)
+            val = self._parse_state_value(states[current_state_ptr])
+            resampled_profile.append(val if val is not None else 0.0)
 
         if len(resampled_profile) > 20:
             self.learned_profiles[entity_id] = resampled_profile
@@ -378,15 +405,8 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             return fallback
 
         state = self.hass.states.get(entity_id)
-        if not state or state.state in ("unknown", "unavailable"):
-            return fallback
-
-        try:
-            # Ersetzt Komma durch Punkt für deutsche Lokalisierung und wandelt in Float um
-            val = state.state.replace(",", ".")
-            return float(val)
-        except (TypeError, ValueError):
-            return fallback
+        val = self._parse_state_value(state)
+        return val if val is not None else fallback
 
     def _calculate_available_battery_wh(self, battery_soc, battery_energy_kwh, min_soc):
         """Berechnet die tatsächlich nutzbare Energie oberhalb des Mindest-SoC."""
