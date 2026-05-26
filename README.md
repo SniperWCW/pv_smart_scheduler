@@ -9,13 +9,14 @@ Die Integration erzeugt eine zentrale Entität `sensor.pv_smart_scheduler_zentra
 ## Funktionen
 
 - Priorisierte Geräteplanung über die Home Assistant UI
-- Adaptive Verbrauchsprofile aus der Recorder-Historie der letzten 14 Tage
+- Intelligente Verbrauchsprofile: Lernt aus der Historie (14 Tage) und normalisiert Daten auf 1-Minuten-Intervalle (Resampling)
 - Unterstützung für PV-Prognosen in W und Solcast-Restenergie in kWh
 - Berücksichtigung aktueller PV-Produktion in W
 - Berücksichtigung von Haus-Basislast in W
 - Optionale Batterieplanung mit SoC, verfügbarer Energie in kWh und Mindest-SoC
 - Erkennung laufender Geräte über aktuelle Leistungsaufnahme
 - Geräte nachträglich einzeln löschen
+- Geräte-Einstellungen (Entität, Priorität, Zielabdeckung) nachträglich bearbeiten
 - Lovelace-Karte für die visuelle Anzeige
 
 ## Benötigte Sensoren
@@ -46,9 +47,10 @@ Solcast-Sensoren mit `unit_of_measurement: kWh` werden unterstützt. Die Integra
 
 ## Nachträglich anpassen
 
-Über das Zahnrad der Integration stehen zwei Optionen zur Verfügung:
+Über das Zahnrad der Integration stehen folgende Optionen zur Verfügung:
 
 - Globale Sensoren ändern
+- Gerät bearbeiten (Entität, Priorität oder Zielabdeckung anpassen)
 - Einzelnes Gerät löschen
 
 Die globalen Sensoren gelten für alle konfigurierten Geräte. Beim Löschen wird nur das ausgewählte Gerät entfernt.
