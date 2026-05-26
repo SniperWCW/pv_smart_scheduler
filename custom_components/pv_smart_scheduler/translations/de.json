@@ -39,7 +39,24 @@
       "init": {
         "menu_options": {
           "global_sensors": "Globale Sensoren ändern",
+          "edit_device_select": "Gerät bearbeiten",
           "remove_device": "Einzelnes Gerät löschen"
+        }
+      },
+      "edit_device_select": {
+        "title": "PV Smart Scheduler: Gerät auswählen",
+        "description": "Wähle das Gerät aus, das du bearbeiten möchtest.",
+        "data": {
+          "device_power_sensor": "Gerät"
+        }
+      },
+      "edit_device_form": {
+        "title": "PV Smart Scheduler: Gerät anpassen",
+        "description": "Passe die Entität, Priorität oder Zielabdeckung für dieses Gerät an.",
+        "data": {
+          "device_power_sensor": "Geräte-Leistungssensor",
+          "target_coverage": "Gewünschte PV-Abdeckung",
+          "priority": "Priorität"
         }
       },
       "global_sensors": {
