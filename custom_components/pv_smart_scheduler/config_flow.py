@@ -273,14 +273,88 @@ class PVSmartSchedulerOptionsFlowHandler(
 
     def __init__(self, config_entry):
         self._config_entry = config_entry
+        self._selected_device_id = None
 
     async def async_step_init(self, user_input=None):
         return self.async_show_menu(
             step_id="init",
             menu_options=[
                 "global_sensors",
+                "edit_device_select",
                 "remove_device"
             ]
+        )
+
+    async def async_step_edit_device_select(self, user_input=None):
+        """Schritt 1: Gerät zum Bearbeiten auswählen."""
+        devices = self._config_entry.data.get("devices", [])
+        
+        if user_input is not None:
+            self._selected_device_id = user_input["device_power_sensor"]
+            return await self.async_step_edit_device_form()
+
+        if not devices:
+            return self.async_abort(reason="no_devices")
+
+        device_options = {
+            device["device_power_sensor"]: self._device_label(device["device_power_sensor"])
+            for device in devices
+        }
+
+        return self.async_show_form(
+            step_id="edit_device_select",
+            data_schema=vol.Schema({
+                vol.Required("device_power_sensor"): vol.In(device_options)
+            })
+        )
+
+    async def async_step_edit_device_form(self, user_input=None):
+        """Schritt 2: Die Daten des ausgewählten Geräts bearbeiten."""
+        devices = list(self._config_entry.data.get("devices", []))
+        current_device = next((d for d in devices if d.get("device_power_sensor") == self._selected_device_id), None)
+
+        if user_input is not None:
+            new_devices = []
+            for device in devices:
+                if device.get("device_power_sensor") == self._selected_device_id:
+                    new_devices.append({
+                        "device_power_sensor": user_input["device_power_sensor"],
+                        "target_coverage": user_input["target_coverage"],
+                        "priority": user_input["priority"]
+                    })
+                else:
+                    new_devices.append(device)
+
+            self.hass.config_entries.async_update_entry(
+                self._config_entry,
+                data={**self._config_entry.data, "devices": new_devices}
+            )
+            return self.async_create_entry(title="", data=dict(self._config_entry.options))
+
+        schema = vol.Schema({
+            vol.Required(
+                "device_power_sensor", 
+                default=current_device["device_power_sensor"]
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor", device_class="power")
+            ),
+            vol.Required(
+                "target_coverage", 
+                default=current_device.get("target_coverage", 90)
+            ): vol.All(
+                vol.Coerce(int), vol.Range(min=1, max=100)
+            ),
+            vol.Required(
+                "priority", 
+                default=current_device.get("priority", 1)
+            ): vol.All(
+                vol.Coerce(int), vol.Range(min=1, max=10)
+            )
+        })
+
+        return self.async_show_form(
+            step_id="edit_device_form",
+            data_schema=schema
         )
 
     async def async_step_global_sensors(self, user_input=None):
