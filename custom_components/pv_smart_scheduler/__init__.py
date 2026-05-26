@@ -257,31 +257,72 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             return 0.85
 
     async def _get_adaptive_profile(self, entity_id):
+        """Erstellt ein zeitlich korrektes 1-Minuten-Leistungsprofil aus der Historie."""
         if entity_id in self.learned_profiles and len(self.learned_profiles[entity_id]) > 0:
             return self.learned_profiles[entity_id]
 
         now = dt_util.utcnow()
-        history_list = await self.hass.async_add_executor_job(
+        history_dict = await self.hass.async_add_executor_job(
             history.get_significant_states, self.hass, now - timedelta(days=PROFILE_LOOKBACK_DAYS), now, [entity_id]
         )
+
         default_profile = [300] * 120
-        if entity_id not in history_list or not history_list[entity_id]:
+        states = history_dict.get(entity_id, [])
+        if not states:
             return default_profile
 
-        active_phase = []
-        for state in history_list[entity_id]:
+        # 1. Finde den letzten Zeitpunkt, an dem das Gerät aktiv war (> THRESHOLD)
+        last_active_idx = -1
+        for i in range(len(states) - 1, -1, -1):
             try:
-                if state.state in ("unknown", "unavailable"): continue
-                val = float(state.state)
-                if val > 15: active_phase.append(val)
-                elif len(active_phase) > 45: break
-                else: active_phase = []
-            except (ValueError, TypeError): continue
+                if float(states[i].state) > DEVICE_ACTIVE_POWER_THRESHOLD:
+                    last_active_idx = i
+                    break
+            except (ValueError, TypeError):
+                continue
 
-        if len(active_phase) > 30:
-            self.learned_profiles[entity_id] = active_phase
+        if last_active_idx == -1:
+            return default_profile
+
+        # 2. Finde den Start dieser aktiven Phase (gehe zurück bis eine Lücke > 20 Min auftritt)
+        start_active_idx = last_active_idx
+        for i in range(last_active_idx, 0, -1):
+            try:
+                diff = (states[i].last_changed - states[i-1].last_changed).total_seconds()
+                if diff > 1200: # 20 Minuten Inaktivität beenden die Phase
+                    break
+                start_active_idx = i - 1
+            except (ValueError, TypeError):
+                continue
+
+        # 3. Resampling auf 1-Minuten-Intervalle
+        start_dt = states[start_active_idx].last_changed
+        end_dt = states[last_active_idx].last_changed
+        duration_mins = int((end_dt - start_dt).total_seconds() / 60)
+
+        if duration_mins < 10: # Zu kurze Phasen ignorieren
+            return default_profile
+
+        duration_mins = min(duration_mins, 360) # Max 6 Stunden
+        resampled_profile = []
+        current_state_ptr = start_active_idx
+
+        for m in range(duration_mins + 1):
+            check_time = start_dt + timedelta(minutes=m)
+            while (current_state_ptr + 1 <= last_active_idx and 
+                   states[current_state_ptr + 1].last_changed <= check_time):
+                current_state_ptr += 1
+            
+            try:
+                resampled_profile.append(float(states[current_state_ptr].state))
+            except:
+                resampled_profile.append(0.0)
+
+        if len(resampled_profile) > 20:
+            self.learned_profiles[entity_id] = resampled_profile
             await self.hass.async_add_executor_job(self.save_learned_profiles)
-            return active_phase
+            return resampled_profile
+
         return default_profile
 
     def _get_pv_forecast(self, forecast_sensor_id):
