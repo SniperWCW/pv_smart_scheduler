@@ -193,21 +193,30 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             **forecast_context
         }
 
+        # 1. Basislast-Bereinigung: Wir ermitteln, wie viel der aktuellen Last auf bereits 
+        # laufende, vom Scheduler gesteuerte Geräte entfällt.
+        total_base_load = self._get_float_state(first_config.get("home_base_load_sensor"), 300.0)
+        managed_running_power = 0.0
+        for dev_id in self.devices_config:
+            p = self._get_float_state(dev_id, 0.0)
+            if p > DEVICE_ACTIVE_POWER_THRESHOLD:
+                managed_running_power += p
+        
+        # Die "echte" Basislast ist der Hausverbrauch minus die gesteuerten Geräte.
+        clean_base_load = max(0.0, total_base_load - managed_running_power)
+
         for entity_id, config in sorted_devices:
             try:
                 profile = await self._get_adaptive_profile(entity_id)
                 current_device_power = self._get_float_state(entity_id, 0.0)
                 is_running = current_device_power > DEVICE_ACTIVE_POWER_THRESHOLD
-                base_load_state = self.hass.states.get(config["home_base_load_sensor"])
-                base_load = max(0.0, float(base_load_state.state)) if base_load_state and base_load_state.state not in ("unknown", "unavailable") else 300.0
 
                 best_start, max_coverage, battery_used_wh = self._calculate_best_window(
-                    profile, virtual_pv_forecast, base_load, remaining_battery_wh
+                    profile, virtual_pv_forecast, clean_base_load, remaining_battery_wh, config.get("target_coverage", 90)
                 )
 
                 recommendation = "läuft" if is_running else ("ja" if max_coverage >= config["target_coverage"] and best_start == 0 else "warten")
-                avg_watts = sum(profile) / len(profile) if profile else 0
-                total_kwh = (avg_watts * (len(profile) / 60)) / 1000
+                total_kwh = (sum(profile) / 60) / 1000 if profile else 0
 
                 results[entity_id] = {
                     "recommendation": recommendation,
@@ -221,7 +230,8 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                     "priority": config["priority"]
                 }
 
-                if recommendation in ("ja", "läuft") and best_start == 0:
+                # Reserviere PV-Leistung und Batterie für dieses Gerät, wenn es läuft oder jetzt starten soll
+                if is_running or (recommendation == "ja" and best_start == 0):
                     profile_len = len(profile)
                     for i in range(min(profile_len, len(virtual_pv_forecast))):
                         virtual_pv_forecast[i] = max(0.0, virtual_pv_forecast[i] - profile[i])
@@ -377,10 +387,20 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             return fallback
 
     def _calculate_available_battery_wh(self, battery_soc, battery_energy_kwh, min_soc):
-        if battery_soc is None or battery_soc < min_soc:
+        """Berechnet die tatsächlich nutzbare Energie oberhalb des Mindest-SoC."""
+        if battery_soc is None or battery_soc <= min_soc or battery_energy_kwh <= 0:
             return 0.0
 
-        return max(0.0, battery_energy_kwh * 1000)
+        try:
+            # Berechnung der Gesamtkapazität basierend auf aktuellem Stand und SoC.
+            # Wenn z.B. 5kWh bei 50% SoC im Speicher sind, beträgt die Gesamtkapazität 10kWh.
+            total_capacity = battery_energy_kwh / (battery_soc / 100.0)
+            # Die Energie, die dem Mindest-SoC entspricht, ist nicht für den Scheduler verfügbar.
+            min_energy_limit = total_capacity * (min_soc / 100.0)
+            usable_kwh = max(0.0, battery_energy_kwh - min_energy_limit)
+            return usable_kwh * 1000.0
+        except (ZeroDivisionError, TypeError, ValueError):
+            return 0.0
 
     def _build_virtual_pv_forecast(self, raw_forecast, weather_stability, current_pv_power):
         forecast = [watt * weather_stability for watt in raw_forecast]
@@ -394,14 +414,14 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
 
         return forecast
 
-    def _calculate_best_window(self, profile, forecast, base_load, battery_available_wh=0.0):
+    def _calculate_best_window(self, profile, forecast, base_load, battery_available_wh=0.0, target_coverage=90.0):
+        """Findet das optimale Zeitfenster unter Berücksichtigung der Zielabdeckung."""
         profile_len = len(profile)
         forecast_len = len(forecast)
-        if profile_len >= forecast_len: return 0, 0.0, 0.0
+        if profile_len >= forecast_len:
+            return 0, 0.0, 0.0
         
-        best_start_minute = 0
-        max_coverage_found = -1.0
-        best_battery_used_wh = 0.0
+        windows = []
         battery_available_watt_minutes = battery_available_wh * 60
 
         for start_min in range(0, forecast_len - profile_len, 15):
@@ -421,9 +441,25 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             covered_energy = covered_by_pv_energy + covered_by_battery_energy
             
             coverage_percent = (covered_energy / total_device_energy) * 100 if total_device_energy > 0 else 0
-            if coverage_percent > max_coverage_found:
-                max_coverage_found = coverage_percent
-                best_start_minute = start_min
-                best_battery_used_wh = covered_by_battery_energy / 60
-                
-        return best_start_minute, max_coverage_found, best_battery_used_wh
+            
+            windows.append({
+                "start": start_min,
+                "coverage": coverage_percent,
+                "battery_wh": covered_by_battery_energy / 60
+            })
+
+        if not windows:
+            return 0, 0.0, 0.0
+
+        # 1. Wenn das aktuelle Fenster (t=0) bereits die Zielabdeckung erreicht -> Sofort starten
+        if windows[0]["coverage"] >= target_coverage:
+            return 0, windows[0]["coverage"], windows[0]["battery_wh"]
+
+        # 2. Das erste Fenster finden, das die Zielabdeckung erreicht
+        for w in windows:
+            if w["coverage"] >= target_coverage:
+                return w["start"], w["coverage"], w["battery_wh"]
+
+        # 3. Sonst: Das Fenster mit der maximalen Abdeckung wählen
+        best_w = max(windows, key=lambda x: x["coverage"])
+        return best_w["start"], best_w["coverage"], best_w["battery_wh"]
