@@ -38,12 +38,17 @@ class PVSmartSchedulerCard extends HTMLElement {
       devices.forEach((device) => {
         const isReady = device.recommendation === 'ja';
         const currentPower = this.getFirstNumber(device, ['current_power'], 0);
-        const isRunning = device.is_running || device.recommendation === 'läuft' || currentPower > 15;
+        const isRunning = device.is_running === true || device.recommendation === 'läuft' || currentPower > 15;
         const startMins = this.getFirstNumber(
           device,
           ['best_start_mins', 'best_start_minutes', 'start_in_mins'],
           0
         );
+        const startTimeStr = device.best_start_time;
+        let timeLabel = '';
+        if (startTimeStr) {
+          timeLabel = new Date(startTimeStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
         const pvCoverage = this.getFirstNumber(
           device,
           ['pv_coverage', 'coverage_percent', 'pvDeckung'],
@@ -56,15 +61,15 @@ class PVSmartSchedulerCard extends HTMLElement {
         );
 
         let bestStartDisplay = 'Warten';
+        const statusColor = isRunning ? 'var(--info-color, #2196f3)' : (isReady ? 'var(--success-color, #4caf50)' : 'var(--warning-color, #ff9800)');
+
         if (isRunning) {
-          bestStartDisplay = 'Läuft bereits';
-          bestStartDisplay = currentPower > 15 ? `${this.formatNumber(currentPower, 0)} W` : 'Läuft bereits';
+          bestStartDisplay = currentPower > 5 ? `${this.formatNumber(currentPower, 0)} W` : 'Läuft';
         } else if (isReady && startMins === 0) {
           bestStartDisplay = 'Sofort';
-        } else if (startMins > 0) {
-          bestStartDisplay = `In ${startMins} Min`;
+        } else if (startMins > 0 && timeLabel) {
+          bestStartDisplay = timeLabel;
         }
-        const statusColor = isRunning ? 'var(--info-color, #2196f3)' : (isReady ? 'var(--success-color, #4caf50)' : 'var(--warning-color, #ff9800)');
         const icon = this.getDeviceIcon(device.name || '');
         const name = this.escapeHtml(device.name || 'Gerät');
         const prio = device.priority !== undefined && device.priority !== null ? device.priority : '-';
