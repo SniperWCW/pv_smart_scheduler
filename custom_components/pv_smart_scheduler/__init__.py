@@ -195,24 +195,24 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         if not state or state.state in ("unknown", "unavailable", ""):
             return None
 
-        # 1. Prüfe Attribute (oft präziser oder enthält die Zahl, wenn State "on/off" ist)
-        for attr in ("current_power_w", "power", "load", "current_consumption", "power_consumption", "watt", "watts", "current_power"):
-            val = state.attributes.get(attr)
-            if val is not None:
-                parsed = self._clean_numeric_string(str(val))
-                if parsed is not None:
-                    return parsed
-
-        try:
-            # 2. Haupt-Status parsen
-            val = self._clean_numeric_string(state.state)
-            if val is None:
-                return None
-                
+        # 1. Zuerst den Haupt-Status versuchen (wenn es eine Zahl ist, ist das die Quelle der Wahrheit)
+        val = self._clean_numeric_string(state.state)
+        if val is not None:
             unit = state.attributes.get("unit_of_measurement")
             if unit and unit.strip().lower() == "kw":
                 val *= 1000.0
             return val
+
+        # 2. Wenn der Status keine Zahl ist (z.B. "on", "heating"), prüfe Attribute
+        for attr in ("current_power_w", "power", "load", "current_consumption", "power_consumption", "watt", "watts", "current_power"):
+            attr_val = state.attributes.get(attr)
+            if attr_val is not None:
+                parsed = self._clean_numeric_string(str(attr_val))
+                if parsed is not None:
+                    return parsed
+
+        try:
+            return None
         except (TypeError, ValueError, IndexError):
             return None
 
@@ -308,7 +308,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
 
             except Exception as err:
                 _LOGGER.error(f"Fehler bei Berechnung für {entity_id}: {err}")
-                results[entity_id] = {"recommendation": "warten", "best_start_mins": 0, "coverage_percent": 0, "total_kwh": 0, "weather_stability": 80, "priority": config["priority"], "best_start_time": None}
+                results[entity_id] = {"recommendation": "warten", "is_running": False, "current_power": 0.0, "best_start_mins": 0, "coverage_percent": 0, "total_kwh": 0, "weather_stability": 80, "priority": config["priority"], "best_start_time": None}
                 
         return results
 
