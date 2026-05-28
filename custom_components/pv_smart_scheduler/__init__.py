@@ -89,6 +89,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         self.unique_device_count = 0
         self.learned_profiles = {}
         self.last_context = {}
+        self._profile_query_timestamps = {}
         self.profile_path = hass.config.path("pv_smart_scheduler_profiles_v3.json")
 
     async def async_refresh_devices_config(self):
@@ -246,6 +247,9 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                     profile, virtual_pv_forecast, clean_base_load, remaining_battery_wh, config.get("target_coverage", 90)
                 )
 
+                # Berechne konkrete Uhrzeit
+                start_time = dt_util.now() + timedelta(minutes=best_start)
+
                 recommendation = "läuft" if is_running else ("ja" if max_coverage >= config["target_coverage"] and best_start == 0 else "warten")
                 total_kwh = (sum(profile) / 60) / 1000 if profile else 0
 
@@ -257,6 +261,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                     "coverage_percent": round(max_coverage, 1),
                     "total_kwh": round(total_kwh, 2),
                     "battery_used_kwh": round(battery_used_wh / 1000, 2),
+                    "best_start_time": start_time.isoformat(),
                     "weather_stability": round(weather_stability * 100, 0),
                     "priority": config["priority"]
                 }
@@ -270,7 +275,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
 
             except Exception as err:
                 _LOGGER.error(f"Fehler bei Berechnung für {entity_id}: {err}")
-                results[entity_id] = {"recommendation": "warten", "best_start_mins": 0, "coverage_percent": 0, "total_kwh": 0, "weather_stability": 80, "priority": config["priority"]}
+                results[entity_id] = {"recommendation": "warten", "best_start_mins": 0, "coverage_percent": 0, "total_kwh": 0, "weather_stability": 80, "priority": config["priority"], "best_start_time": None}
                 
         return results
 
@@ -299,8 +304,14 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
 
     async def _get_adaptive_profile(self, entity_id):
         """Erstellt ein zeitlich korrektes 1-Minuten-Leistungsprofil aus der Historie."""
-        if entity_id in self.learned_profiles and len(self.learned_profiles[entity_id]) > 0:
+        now = dt_util.utcnow()
+        
+        # Throttling: Historie nur einmal pro Stunde abfragen oder wenn Profil fehlt
+        last_check = self._profile_query_timestamps.get(entity_id, dt_util.utc_from_timestamp(0))
+        if entity_id in self.learned_profiles and (now - last_check).total_seconds() < 3600:
             return self.learned_profiles[entity_id]
+
+        self._profile_query_timestamps[entity_id] = now
 
         now = dt_util.utcnow()
         history_dict = await self.hass.async_add_executor_job(
@@ -312,18 +323,22 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         if not states:
             return default_profile
 
-        # 1. Finde den letzten Zeitpunkt, an dem das Gerät aktiv war (> THRESHOLD)
+        # 1. Finde den letzten BEENDETEN Zyklus (Übergang von Aktiv zu Inaktiv)
+        # Wir gehen von hinten nach vorne durch die Historie
         last_active_idx = -1
-        for i in range(len(states) - 1, -1, -1):
-            val = self._parse_state_value(states[i])
-            if val is not None and val > DEVICE_ACTIVE_POWER_THRESHOLD:
-                last_active_idx = i
-                break
+        for i in range(len(states) - 2, -1, -1):
+            val_current = self._parse_state_value(states[i])
+            val_next = self._parse_state_value(states[i+1])
+            
+            if val_current is not None and val_current > DEVICE_ACTIVE_POWER_THRESHOLD:
+                if val_next is not None and val_next <= DEVICE_ACTIVE_POWER_THRESHOLD:
+                    last_active_idx = i
+                    break
 
         if last_active_idx == -1:
-            return default_profile
+            return self.learned_profiles.get(entity_id, default_profile)
 
-        # 2. Finde den Start dieser aktiven Phase (gehe zurück bis eine Lücke > 20 Min auftritt)
+        # 2. Finde den Start dieses aktiven Zyklus (gehe zurück bis eine Lücke > 20 Min auftritt)
         start_active_idx = last_active_idx
         for i in range(last_active_idx, 0, -1):
             try:
@@ -355,12 +370,12 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             val = self._parse_state_value(states[current_state_ptr])
             resampled_profile.append(val if val is not None else 0.0)
 
-        if len(resampled_profile) > 20:
+        if len(resampled_profile) > 10:
             self.learned_profiles[entity_id] = resampled_profile
             await self.hass.async_add_executor_job(self.save_learned_profiles)
             return resampled_profile
 
-        return default_profile
+        return self.learned_profiles.get(entity_id, default_profile)
 
     def _get_pv_forecast(self, forecast_sensor_id):
         state = self.hass.states.get(forecast_sensor_id)
@@ -410,7 +425,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
 
     def _calculate_available_battery_wh(self, battery_soc, battery_energy_kwh, min_soc):
         """Berechnet die tatsächlich nutzbare Energie oberhalb des Mindest-SoC."""
-        if battery_soc is None or battery_soc <= min_soc or battery_energy_kwh <= 0:
+        if battery_soc is None or battery_soc <= min_soc or battery_soc <= 0 or battery_energy_kwh <= 0:
             return 0.0
 
         try:
