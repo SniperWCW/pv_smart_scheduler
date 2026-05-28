@@ -153,29 +153,62 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.error(f"Fehler beim Speichern der Profile: {err}")
 
+    def _clean_numeric_string(self, val_str):
+        """Säubert einen String und wandelt ihn in eine float-kompatible Zahl um."""
+        if not val_str:
+            return None
+        
+        # Entferne Leerzeichen und Sonderzeichen wie geschützte Leerzeichen
+        val_str = val_str.strip().replace('\xa0', ' ')
+        # Falls Einheiten vorhanden sind ("1942 W"), nimm nur den ersten Teil
+        val_str = val_str.split()[0]
+
+        # Fall A: Sowohl Punkt als auch Komma vorhanden (z.B. 1.234,56)
+        if "," in val_str and "." in val_str:
+            if val_str.rfind(",") > val_str.rfind("."):
+                # Deutsch: 1.234,56 -> 1234.56
+                val_str = val_str.replace(".", "").replace(",", ".")
+            else:
+                # US: 1,234.56 -> 1234.56
+                val_str = val_str.replace(",", "")
+        else:
+            # Fall B: Nur ein Trenner vorhanden (Punkt ODER Komma)
+            # Wir prüfen, ob es ein Tausender-Trenner sein könnte (z.B. 1.942 oder 1,942)
+            separator = "." if "." in val_str else ("," if "," in val_str else None)
+            if separator:
+                parts = val_str.split(separator)
+                # Wenn genau 3 Stellen nach dem Trenner folgen -> Tausender-Trenner
+                # Ausnahme: Werte wie "0.123" sind Dezimalzahlen.
+                if len(parts) == 2 and len(parts[1]) == 3 and not val_str.startswith("0" + separator):
+                    val_str = val_str.replace(separator, "")
+                else:
+                    # Ansonsten: Komma zu Punkt wandeln für float()
+                    val_str = val_str.replace(",", ".")
+        
+        try:
+            return float(val_str)
+        except ValueError:
+            return None
+
     def _parse_state_value(self, state):
         """Extrahiert einen Float-Wert aus einem State-Objekt unter Berücksichtigung von Einheiten."""
         if not state or state.state in ("unknown", "unavailable", ""):
             return None
+
+        # 1. Prüfe Attribute (oft präziser oder enthält die Zahl, wenn State "on/off" ist)
+        for attr in ("current_power_w", "power", "load", "current_consumption", "power_consumption", "watt", "watts", "current_power"):
+            val = state.attributes.get(attr)
+            if val is not None:
+                parsed = self._clean_numeric_string(str(val))
+                if parsed is not None:
+                    return parsed
+
         try:
-            # Säubere den String: Nimm nur den ersten Teil (falls Einheiten wie "W" folgen)
-            raw_val = str(state.state).strip()
-            val_str = raw_val.split()[0]
-
-            # Tausender-Trennzeichen und Dezimal-Trenner robust handhaben
-            if "," in val_str and "." in val_str:
-                # Wenn beides da ist, ist der letzte meist der Dezimaltrenner
-                if val_str.rfind(",") > val_str.rfind("."):
-                    # Deutsch/EU: 1.234,56 -> 1234.56
-                    val_str = val_str.replace(".", "").replace(",", ".")
-                else:
-                    # US: 1,234.56 -> 1234.56
-                    val_str = val_str.replace(",", "")
-            else:
-                # Nur ein Trenner vorhanden -> Einfach Komma durch Punkt ersetzen
-                val_str = val_str.replace(",", ".")
-
-            val = float(val_str)
+            # 2. Haupt-Status parsen
+            val = self._clean_numeric_string(state.state)
+            if val is None:
+                return None
+                
             unit = state.attributes.get("unit_of_measurement")
             if unit and unit.strip().lower() == "kw":
                 val *= 1000.0
