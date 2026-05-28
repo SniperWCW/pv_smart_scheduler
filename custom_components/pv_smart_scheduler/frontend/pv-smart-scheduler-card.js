@@ -79,7 +79,7 @@ class PVSmartSchedulerCard extends HTMLElement {
             <td style="padding: 10px 4px; font-weight: bold; color: var(--secondary-text-color);">#${prio}</td>
             <td style="padding: 10px 4px; font-weight: 500;">
               <div style="display: flex; align-items: center; gap: 8px;">
-                <ha-icon icon="${icon}" style="color: ${isRunning ? 'var(--info-color, #2196f3)' : (isReady ? 'var(--success-color, #4caf50)' : 'var(--primary-text-color)')}; --mdc-icon-size: 18px;"></ha-icon>
+                <ha-icon icon="${icon}" style="color: ${statusColor}; --mdc-icon-size: 18px;"></ha-icon>
                 <span>${name}</span>
               </div>
             </td>
@@ -88,7 +88,7 @@ class PVSmartSchedulerCard extends HTMLElement {
                 ${bestStartDisplay}
               </span>
             </td>
-            <td style="padding: 10px 4px; text-align: right; font-weight: bold; color: ${isRunning ? '#2196f3' : (isReady ? 'var(--success-color, #4caf50)' : 'var(--primary-text-color)')};">
+            <td style="padding: 10px 4px; text-align: right; font-weight: bold; color: ${statusColor};">
               ${this.formatNumber(pvCoverage, 1)}%
               <div style="font-size: 10px; font-weight: normal; color: var(--secondary-text-color);">${this.formatNumber(estimatedKwh, 2)} kWh</div>
             </td>
