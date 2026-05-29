@@ -13,16 +13,16 @@ class PVSmartSchedulerCard extends HTMLElement {
     if (!this.content) {
       this.innerHTML = `
         <ha-card>
+          <div id="card-header-info" style="padding: 12px 16px 0 16px; font-size: 12px; display: flex; justify-content: space-between; align-items: center;">
+            <div id="battery-status"></div>
+            <div id="forecast-status"></div>
+          </div>
           <style>
-            .timeline-container {
+            .timeline-wrapper {
               margin-top: 16px;
-              padding: 0 4px;
+              padding: 20px 4px 4px 4px;
               position: relative;
-              height: 40px;
-              background: var(--secondary-background-color, #f0f0f0);
-              border-radius: 4px;
-              display: flex;
-              align-items: center;
+              border-top: 1px solid var(--divider-color);
             }
             .timeline-axis {
               position: absolute;
@@ -33,9 +33,17 @@ class PVSmartSchedulerCard extends HTMLElement {
               font-size: 10px;
               color: var(--secondary-text-color);
             }
+            .timeline-lane {
+              position: relative;
+              height: 24px;
+              background: var(--secondary-background-color, rgba(0,0,0,0.05));
+              margin-bottom: 6px;
+              border-radius: 3px;
+              width: 100%;
+            }
             .device-bar {
               position: absolute;
-              height: 20px;
+              height: 100%;
               border-radius: 2px;
               opacity: 0.7;
               font-size: 8px;
@@ -65,13 +73,29 @@ class PVSmartSchedulerCard extends HTMLElement {
       `;
       this.content = this.querySelector('#scheduler-tbody');
       this.timelineArea = this.querySelector('#timeline-area');
+      this.headerBattery = this.querySelector('#battery-status');
+      this.headerForecast = this.querySelector('#forecast-status');
     }
 
     let html = '';
-    let timelineHtml = `
-      <div class="timeline-container">
-        <div class="timeline-axis"><span>08:00</span><span>12:00</span><span>16:00</span><span>20:00</span></div>
+    let timelineRowsHtml = '';
+    const timelineAxis = `
+      <div class="timeline-axis"><span>08:00</span><span>12:00</span><span>16:00</span><span>20:00</span></div>
     `;
+
+    // Header Infos aktualisieren
+    const batSoc = stateObj.attributes.battery_soc;
+    const batWarn = stateObj.attributes.battery_night_warning;
+    if (batSoc !== undefined) {
+      this.headerBattery.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 4px; color: ${batWarn ? 'var(--error-color, #f44336)' : 'var(--secondary-text-color)'};">
+          <ha-icon icon="${batWarn ? 'mdi:battery-alert' : 'mdi:battery-check'}" style="--mdc-icon-size: 16px;"></ha-icon>
+          <span>Akku: ${batSoc}% ${batWarn ? '(Knapp für Nacht)' : ''}</span>
+        </div>
+      `;
+    }
+    const avgPower = stateObj.attributes.forecast_average_power;
+    this.headerForecast.innerHTML = avgPower ? `<span style="color: var(--secondary-text-color);">Ø Prognose: ${avgPower} W</span>` : '';
 
     if (devices.length === 0) {
       html = `<tr><td colspan="4" style="padding: 16px; text-align: center; color: var(--secondary-text-color);">Keine Geräte konfiguriert</td></tr>`;
@@ -118,7 +142,7 @@ class PVSmartSchedulerCard extends HTMLElement {
             </td>
             <td style="padding: 10px 4px; text-align: center;">
               <span style="background: ${statusColor}22; color: ${statusColor}; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; display: inline-block; min-width: 80px;">
-                ${bestStartDisplay}
+                ${bestStartDisplay} ${!isRunning && pvCoverage < (stateObj.attributes.target_coverage || 80) ? '⚠️' : ''}
               </span>
             </td>
             <td style="padding: 10px 4px; text-align: right; font-weight: bold; color: ${statusColor};">
@@ -141,19 +165,26 @@ class PVSmartSchedulerCard extends HTMLElement {
             if (startOffset >= 0 && startOffset < timelineTotal) {
                 const left = (startOffset / timelineTotal) * 100;
                 const width = (durationMins / timelineTotal) * 100;
-                timelineHtml += `
-                  <div class="device-bar" style="left: ${left}%; width: ${width}%; background: ${statusColor};" title="${name}">
-                    ${width > 10 ? name : ''}
+                
+                timelineRowsHtml += `
+                  <div style="display: flex; align-items: center; margin-bottom: 4px;">
+                    <div style="width: 70px; font-size: 9px; color: var(--secondary-text-color); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 4px;">
+                      ${name}
+                    </div>
+                    <div class="timeline-lane">
+                      <div class="device-bar" style="left: ${left}%; width: ${width}%; background: ${statusColor};" title="${name}: ${timeLabel}">
+                        ${width > 15 ? name : ''}
+                      </div>
+                    </div>
                   </div>
                 `;
             }
         }
       });
-      timelineHtml += '</div>';
     }
 
     this.content.innerHTML = html;
-    this.timelineArea.innerHTML = timelineHtml;
+    this.timelineArea.innerHTML = timelineRowsHtml ? `<div class="timeline-wrapper">${timelineAxis}${timelineRowsHtml}</div>` : '';
   }
 
   getFirstNumber(source, keys, fallback = 0) {
