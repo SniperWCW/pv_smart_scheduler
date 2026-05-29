@@ -16,7 +16,7 @@ _LOGGER = logging.getLogger(__name__)
 PROFILE_LOOKBACK_DAYS = 14
 DEFAULT_BATTERY_MIN_SOC = 25
 DEVICE_ACTIVE_POWER_THRESHOLD = 15
-FORECAST_HORIZON_MINUTES = 240
+FORECAST_HORIZON_MINUTES = 720
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Wird beim allgemeinen Starten von Home Assistant aufgerufen."""
@@ -269,6 +269,12 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         # Die "echte" Basislast ist der Hausverbrauch minus die gesteuerten Geräte.
         clean_base_load = max(0.0, total_base_load - managed_running_power)
 
+        # Nachtverbrauchsschätzung (Grob: 12 Stunden Nacht * Basislast)
+        night_usage_wh = clean_base_load * 12
+        self.last_context["night_usage_estimate_wh"] = round(night_usage_wh, 1)
+        # Warnung, wenn verfügbare Batterie (über min SOC) nicht für die Nacht reicht
+        self.last_context["battery_night_warning"] = battery_available_wh < night_usage_wh
+
         for entity_id, config in sorted_devices:
             try:
                 profile = await self._get_adaptive_profile(entity_id)
@@ -405,7 +411,10 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             val = self._parse_state_value(states[current_state_ptr])
             resampled_profile.append(val if val is not None else 0.0)
 
-        if len(resampled_profile) > 10:
+        # Qualitäts-Check: Nur speichern, wenn das Profil lang genug ist 
+        # UND eine Mindestmenge an Energie (Wh) enthält (verhindert Standby-Lernen)
+        total_energy_wh = (sum(resampled_profile) / 60)
+        if len(resampled_profile) > 20 and total_energy_wh > 50:
             self.learned_profiles[entity_id] = resampled_profile
             await self.hass.async_add_executor_job(self.save_learned_profiles)
             return resampled_profile
@@ -439,7 +448,8 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             return [max(0.0, average_power) for _ in range(FORECAST_HORIZON_MINUTES)], context
 
         context["forecast_average_power"] = round(forecast_value, 1)
-        return [max(0, forecast_value - (i * 3)) for i in range(FORECAST_HORIZON_MINUTES)], context
+        # Weniger aggressiver Abfall für den Fallback-Forecast
+        return [max(0, forecast_value - (i * 1.5)) for i in range(FORECAST_HORIZON_MINUTES)], context
 
     def _remaining_daylight_minutes(self):
         now = dt_util.now()
@@ -513,17 +523,19 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             covered_energy = covered_by_pv_energy + covered_by_battery_energy
             
             coverage_percent = (covered_energy / total_device_energy) * 100 if total_device_energy > 0 else 0
+            absolute_pv_sum = sum(forecast[start_min:start_min + profile_len])
             
             windows.append({
                 "start": start_min,
                 "coverage": coverage_percent,
-                "battery_wh": covered_by_battery_energy / 60
+                "battery_wh": covered_by_battery_energy / 60,
+                "absolute_pv": absolute_pv_sum
             })
 
-        if not windows:
-            return 0, 0.0, 0.0
+        # 1. Falls keine Fenster berechnet werden konnten
+        if not windows: return 0, 0.0, 0.0
 
-        # 1. Wenn das aktuelle Fenster (t=0) bereits die Zielabdeckung erreicht -> Sofort starten
+        # 2. Wenn das aktuelle Fenster (t=0) bereits die Zielabdeckung erreicht -> Sofort starten
         if windows[0]["coverage"] >= target_coverage:
             return 0, windows[0]["coverage"], windows[0]["battery_wh"]
 
@@ -532,6 +544,9 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             if w["coverage"] >= target_coverage:
                 return w["start"], w["coverage"], w["battery_wh"]
 
-        # 3. Sonst: Das Fenster mit der maximalen Abdeckung wählen
-        best_w = max(windows, key=lambda x: x["coverage"])
+        # 3. Sonst: Das Fenster mit der maximalen Abdeckung wählen. 
+        # Wir gewichten die Abdeckung am höchsten, aber bei Gleichstand (oder geringer Deckung) 
+        # nehmen wir das Fenster mit der absolut höchsten PV-Leistungssumme (Peak-Suche).
+        best_w = max(windows, key=lambda x: (x["coverage"], x["absolute_pv"], -x["start"]))
+
         return best_w["start"], best_w["coverage"], best_w["battery_wh"]
