@@ -103,7 +103,9 @@ class PVSmartSchedulerMasterSensor(
             "unique_device_count": context.get("unique_device_count"),
             "forecast_source_unit": context.get("forecast_source_unit"),
             "forecast_remaining_kwh": context.get("forecast_remaining_kwh"),
-            "forecast_average_power": context.get("forecast_average_power")
+            "forecast_average_power": context.get("forecast_average_power"),
+            "battery_night_warning": context.get("battery_night_warning"),
+            "night_usage_estimate_wh": context.get("night_usage_estimate_wh")
         }
 
     def _device_display_name(self, entity_id, state):
