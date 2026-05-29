@@ -8,13 +8,14 @@ Die Integration erzeugt eine zentrale Entität `sensor.pv_smart_scheduler_zentra
 
 ## Funktionen
 
-- Priorisierte Geräteplanung über die Home Assistant UI
-- Intelligente Verbrauchsprofile: Lernt aus der Historie (14 Tage) und normalisiert Daten auf 1-Minuten-Intervalle (Resampling)
+- **Visueller Schlachtplan:** Gantt-Timeline (08:00 - 20:00 Uhr) direkt in der Lovelace-Karte für alle geplanten Geräte.
+- **Peak-Finder Technologie:** Findet immer den energetisch besten Zeitpunkt des Tages, auch wenn die PV-Leistung nicht für 100% Deckung ausreicht.
+- **Intelligente Verbrauchsprofile:** Lernt automatisch aus echten Zyklen, ignoriert Standby-Rauschen (<50Wh) und aktualisiert sich kontinuierlich.
+- **12-Stunden Vorausschau:** Erweiterter Planungshorizont (720 Minuten) für eine verlässliche Tagesplanung ab dem Morgen.
 - Unterstützung für PV-Prognosen in W und Solcast-Restenergie in kWh
-- Berücksichtigung aktueller PV-Produktion in W
-- Berücksichtigung von Haus-Basislast in W
-- Optionale Batterieplanung mit SoC, verfügbarer Energie in kWh und Mindest-SoC
-- Erkennung laufender Geräte über aktuelle Leistungsaufnahme
+- **Akku-Nacht-Wächter:** Warnt visuell, wenn der aktuelle SoC voraussichtlich nicht ausreicht, um die Haus-Basislast bis zum nächsten Morgen zu decken.
+- **Robustes Power-Parsing:** Erkennt Leistungswerte zuverlässig in Attributen oder im Hauptstatus, inklusive intelligenter Korrektur von Tausender-Trennzeichen.
+- **Kaskadierende Priorisierung:** Höhere Prioritäten reservieren PV-Leistung und Batterie-Kapazität für nachfolgende Geräte.
 - Geräte nachträglich einzeln löschen
 - Geräte-Einstellungen (Entität, Priorität, Zielabdeckung) nachträglich bearbeiten
 - Lovelace-Karte für die visuelle Anzeige
@@ -67,12 +68,16 @@ Die Entität `sensor.pv_smart_scheduler_zentrale` liefert unter anderem:
 - `forecast_source_unit`: Einheit des Forecast-Sensors
 - `forecast_remaining_kwh`: verbleibende PV-Energie bei kWh-Forecast
 - `forecast_average_power`: daraus berechnete Durchschnittsleistung
+- `battery_night_warning`: True, wenn der Akku vermutlich nicht für die Nacht reicht
+- `night_usage_estimate_wh`: Geschätzter Energiebedarf für 12 Stunden Nacht
 
 Pro Gerät werden unter anderem geliefert:
 
 - `recommendation`: `ja`, `warten` oder `läuft`
 - `is_running`: Gerät läuft aktuell
-- `best_start_mins`: empfohlener Start in Minuten
+- `best_start_time`: Konkreter ISO-Zeitstempel für den geplanten Start
+- `best_start_mins`: Minuten bis zum Start
+- `duration_mins`: Erwartete Programmdauer basierend auf dem gelernten Profil
 - `pv_coverage`: berechnete PV-/Batterie-Deckung
 - `estimated_kwh`: erwarteter Energiebedarf
 - `battery_used_kwh`: eingeplante Batterie-Energie
