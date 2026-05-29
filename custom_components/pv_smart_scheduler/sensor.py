@@ -70,6 +70,7 @@ class PVSmartSchedulerMasterSensor(
                 "current_power": data.get("current_power", 0),
                 "best_start_mins": data.get("best_start_mins", 0),
                 "best_start_time": data.get("best_start_time"),
+                "duration_mins": data.get("duration_mins", 0),
                 "pv_coverage": round(
                     data.get("coverage_percent", 0),
                     1
