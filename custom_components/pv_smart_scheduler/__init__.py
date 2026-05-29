@@ -285,6 +285,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
 
                 recommendation = "läuft" if is_running else ("ja" if max_coverage >= config["target_coverage"] and best_start == 0 else "warten")
                 total_kwh = (sum(profile) / 60) / 1000 if profile else 0
+                duration_mins = len(profile) if profile else 0
 
                 results[entity_id] = {
                     "recommendation": recommendation,
@@ -294,6 +295,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                     "coverage_percent": round(max_coverage, 1),
                     "total_kwh": round(total_kwh, 2),
                     "battery_used_kwh": round(battery_used_wh / 1000, 2),
+                    "duration_mins": duration_mins,
                     "best_start_time": start_time.isoformat(),
                     "weather_stability": round(weather_stability * 100, 0),
                     "priority": config["priority"]
@@ -308,7 +310,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
 
             except Exception as err:
                 _LOGGER.error(f"Fehler bei Berechnung für {entity_id}: {err}")
-                results[entity_id] = {"recommendation": "warten", "is_running": False, "current_power": 0.0, "best_start_mins": 0, "coverage_percent": 0, "total_kwh": 0, "weather_stability": 80, "priority": config["priority"], "best_start_time": None}
+                results[entity_id] = {"recommendation": "warten", "is_running": False, "current_power": 0.0, "best_start_mins": 0, "coverage_percent": 0, "total_kwh": 0, "duration_mins": 0, "weather_stability": 80, "priority": config["priority"], "best_start_time": None}
                 
         return results
 
