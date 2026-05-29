@@ -408,8 +408,13 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                    states[current_state_ptr + 1].last_changed <= check_time):
                 current_state_ptr += 1
             
-            val = self._parse_state_value(states[current_state_ptr])
-            resampled_profile.append(val if val is not None else 0.0)
+            raw_val = self._parse_state_value(states[current_state_ptr])
+            # Noise-Filter: Werte unter dem Schwellenwert werden als 0W gewertet,
+            # um Standby-Rauschen nicht in das Lernprofil zu übernehmen.
+            clean_val = raw_val if raw_val is not None else 0.0
+            if clean_val < DEVICE_ACTIVE_POWER_THRESHOLD:
+                clean_val = 0.0
+            resampled_profile.append(clean_val)
 
         # Qualitäts-Check: Nur speichern, wenn das Profil lang genug ist 
         # UND eine Mindestmenge an Energie (Wh) enthält (verhindert Standby-Lernen)
