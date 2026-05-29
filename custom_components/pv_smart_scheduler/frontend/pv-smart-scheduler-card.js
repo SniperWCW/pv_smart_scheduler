@@ -13,6 +13,40 @@ class PVSmartSchedulerCard extends HTMLElement {
     if (!this.content) {
       this.innerHTML = `
         <ha-card>
+          <style>
+            .timeline-container {
+              margin-top: 16px;
+              padding: 0 4px;
+              position: relative;
+              height: 40px;
+              background: var(--secondary-background-color, #f0f0f0);
+              border-radius: 4px;
+              display: flex;
+              align-items: center;
+            }
+            .timeline-axis {
+              position: absolute;
+              top: -18px;
+              width: 100%;
+              display: flex;
+              justify-content: space-between;
+              font-size: 10px;
+              color: var(--secondary-text-color);
+            }
+            .device-bar {
+              position: absolute;
+              height: 20px;
+              border-radius: 2px;
+              opacity: 0.7;
+              font-size: 8px;
+              color: white;
+              overflow: hidden;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              white-space: nowrap;
+            }
+          </style>
           <div style="padding: 16px;">
             <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 14px;">
               <thead>
@@ -25,51 +59,50 @@ class PVSmartSchedulerCard extends HTMLElement {
               </thead>
               <tbody id="scheduler-tbody"></tbody>
             </table>
+            <div id="timeline-area" style="margin-top: 25px;"></div>
           </div>
         </ha-card>
       `;
       this.content = this.querySelector('#scheduler-tbody');
+      this.timelineArea = this.querySelector('#timeline-area');
     }
 
     let html = '';
+    let timelineHtml = `
+      <div class="timeline-container">
+        <div class="timeline-axis"><span>08:00</span><span>12:00</span><span>16:00</span><span>20:00</span></div>
+    `;
+
     if (devices.length === 0) {
       html = `<tr><td colspan="4" style="padding: 16px; text-align: center; color: var(--secondary-text-color);">Keine Geräte konfiguriert</td></tr>`;
+      timelineHtml = '';
     } else {
       devices.forEach((device) => {
         const isReady = device.recommendation === 'ja';
         const currentPower = this.getFirstNumber(device, ['current_power'], 0);
         const isRunning = (device.is_running === true || device.recommendation === 'läuft' || currentPower > 15) && currentPower > 2;
-        const startMins = this.getFirstNumber(
-          device,
-          ['best_start_mins', 'best_start_minutes', 'start_in_mins'],
-          0
-        );
+        const startMins = this.getFirstNumber(device, ['best_start_mins'], 0);
+        const durationMins = this.getFirstNumber(device, ['duration_mins'], 120);
         const startTimeStr = device.best_start_time;
+        const startTimeObj = startTimeStr ? new Date(startTimeStr) : new Date();
+        
         let timeLabel = '';
         if (startTimeStr) {
-          timeLabel = new Date(startTimeStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          timeLabel = startTimeObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         }
-        const pvCoverage = this.getFirstNumber(
-          device,
-          ['pv_coverage', 'coverage_percent', 'pvDeckung'],
-          0
-        );
-        const estimatedKwh = this.getFirstNumber(
-          device,
-          ['estimated_kwh', 'total_kwh', 'estimatedKwh'],
-          0
-        );
 
-        let bestStartDisplay = 'Warten';
+        const pvCoverage = this.getFirstNumber(device, ['pv_coverage'], 0);
+        const estimatedKwh = this.getFirstNumber(device, ['estimated_kwh'], 0);
+
+        let bestStartDisplay = timeLabel || 'Warten';
         const statusColor = isRunning ? 'var(--info-color, #2196f3)' : (isReady ? 'var(--success-color, #4caf50)' : 'var(--warning-color, #ff9800)');
 
         if (isRunning) {
           bestStartDisplay = currentPower > 5 ? `${this.formatNumber(currentPower, 0)} W` : 'Läuft';
         } else if (isReady && startMins === 0) {
           bestStartDisplay = 'Sofort';
-        } else if (startMins > 0 && timeLabel) {
-          bestStartDisplay = timeLabel;
         }
+
         const icon = this.getDeviceIcon(device.name || '');
         const name = this.escapeHtml(device.name || 'Gerät');
         const prio = device.priority !== undefined && device.priority !== null ? device.priority : '-';
@@ -94,10 +127,33 @@ class PVSmartSchedulerCard extends HTMLElement {
             </td>
           </tr>
         `;
+
+        // Timeline Logik (08:00 - 20:00 Uhr = 720 Minuten Bereich)
+        if (!isRunning && startTimeObj) {
+            const dayStart = new Date(startTimeObj);
+            dayStart.setHours(8, 0, 0, 0);
+            const dayEnd = new Date(startTimeObj);
+            dayEnd.setHours(20, 0, 0, 0);
+
+            const startOffset = (startTimeObj - dayStart) / (1000 * 60); // Minuten seit 08:00
+            const timelineTotal = 720; // 12 Stunden
+
+            if (startOffset >= 0 && startOffset < timelineTotal) {
+                const left = (startOffset / timelineTotal) * 100;
+                const width = (durationMins / timelineTotal) * 100;
+                timelineHtml += `
+                  <div class="device-bar" style="left: ${left}%; width: ${width}%; background: ${statusColor};" title="${name}">
+                    ${width > 10 ? name : ''}
+                  </div>
+                `;
+            }
+        }
       });
+      timelineHtml += '</div>';
     }
 
     this.content.innerHTML = html;
+    this.timelineArea.innerHTML = timelineHtml;
   }
 
   getFirstNumber(source, keys, fallback = 0) {
