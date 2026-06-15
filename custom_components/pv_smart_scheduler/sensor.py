@@ -105,6 +105,7 @@ class PVSmartSchedulerMasterSensor(
             "forecast_remaining_kwh": context.get("forecast_remaining_kwh"),
             "forecast_average_power": context.get("forecast_average_power"),
             "battery_night_warning": context.get("battery_night_warning"),
+            "battery_night_reason": context.get("battery_night_reason"),
             "night_usage_estimate_wh": context.get("night_usage_estimate_wh")
         }
 

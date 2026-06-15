@@ -272,8 +272,15 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         # Nachtverbrauchsschätzung (Grob: 12 Stunden Nacht * Basislast)
         night_usage_wh = clean_base_load * 12
         self.last_context["night_usage_estimate_wh"] = round(night_usage_wh, 1)
-        # Warnung, wenn verfügbare Batterie (über min SOC) nicht für die Nacht reicht
-        self.last_context["battery_night_warning"] = battery_available_wh < night_usage_wh
+        battery_night_warning, battery_night_reason = self._calculate_battery_night_warning(
+            battery_soc,
+            battery_energy_kwh,
+            battery_available_wh,
+            night_usage_wh,
+            battery_min_soc
+        )
+        self.last_context["battery_night_warning"] = battery_night_warning
+        self.last_context["battery_night_reason"] = battery_night_reason
 
         for entity_id, config in sorted_devices:
             try:
@@ -488,6 +495,31 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             return usable_kwh * 1000.0
         except (ZeroDivisionError, TypeError, ValueError):
             return 0.0
+
+    def _calculate_battery_night_warning(
+        self,
+        battery_soc,
+        battery_energy_kwh,
+        battery_available_wh,
+        night_usage_wh,
+        min_soc
+    ):
+        """Warnt nur sicher, wenn genug Batteriedaten für eine belastbare Bewertung vorliegen."""
+        if battery_soc is None:
+            return False, "Kein Batterie-SoC konfiguriert"
+
+        if battery_energy_kwh and battery_energy_kwh > 0:
+            if battery_available_wh < night_usage_wh:
+                return True, "Nutzbare Batterieenergie reicht rechnerisch nicht für die Nacht"
+            return False, "Nutzbare Batterieenergie reicht rechnerisch für die Nacht"
+
+        # Ohne kWh-Sensor kann die Nachtreichweite nicht berechnet werden.
+        # Dann nur bei wirklich niedrigem SoC warnen, statt pauschal "knapp" zu melden.
+        fallback_threshold = max(40, min_soc + 10)
+        if battery_soc < fallback_threshold:
+            return True, "Kein kWh-Sensor vorhanden und SoC unter Reserve-Schwelle"
+
+        return False, "Kein kWh-Sensor vorhanden, SoC ist ausreichend hoch"
 
     def _build_virtual_pv_forecast(self, raw_forecast, weather_stability, current_pv_power):
         forecast = [watt * weather_stability for watt in raw_forecast]
