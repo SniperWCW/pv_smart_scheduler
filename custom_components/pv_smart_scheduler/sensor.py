@@ -110,7 +110,9 @@ class PVSmartSchedulerMasterSensor(
             "battery_night_warning": context.get("battery_night_warning"),
             "battery_night_reason": context.get("battery_night_reason"),
             "night_usage_estimate_wh": context.get("night_usage_estimate_wh"),
-            "night_usage_source": context.get("night_usage_source")
+            "night_usage_source": context.get("night_usage_source"),
+            "night_usage_window_start": context.get("night_usage_window_start"),
+            "night_usage_window_end": context.get("night_usage_window_end")
         }
 
     def _device_display_name(self, entity_id, state):

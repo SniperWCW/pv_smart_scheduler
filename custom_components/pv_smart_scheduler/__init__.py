@@ -292,16 +292,26 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         clean_base_load = max(0.0, total_base_load - managed_running_power)
 
         # Nachtverbrauchsschätzung (Grob: 12 Stunden Nacht * Basislast)
-        configured_night_usage_wh = self._get_energy_state(night_consumption_sensor)
+        night_usage_window_start = None
+        night_usage_window_end = None
+        configured_night_usage_wh, night_usage_source, night_usage_window = await self._get_night_usage_wh(
+            night_consumption_sensor,
+            schedule_start_time,
+            schedule_end_time
+        )
         if configured_night_usage_wh is not None:
             night_usage_wh = configured_night_usage_wh
-            night_usage_source = "configured_night_consumption_sensor"
+            if night_usage_window:
+                night_usage_window_start = night_usage_window[0].isoformat()
+                night_usage_window_end = night_usage_window[1].isoformat()
         else:
             night_usage_wh = clean_base_load * DEFAULT_NIGHT_HOURS
             night_usage_source = "current_base_load_fallback"
 
         self.last_context["night_usage_estimate_wh"] = round(night_usage_wh, 1)
         self.last_context["night_usage_source"] = night_usage_source
+        self.last_context["night_usage_window_start"] = night_usage_window_start
+        self.last_context["night_usage_window_end"] = night_usage_window_end
         battery_night_warning, battery_night_reason = self._calculate_battery_night_warning(
             battery_soc,
             battery_energy_kwh,
@@ -522,6 +532,9 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             return None
 
         state = self.hass.states.get(entity_id)
+        return self._energy_state_to_wh(state)
+
+    def _energy_state_to_wh(self, state):
         val = self._parse_state_value(state)
         if val is None:
             return None
@@ -533,6 +546,101 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             return val * 1000000.0
 
         return val * 1000.0
+
+    async def _get_night_usage_wh(self, entity_id, schedule_start_time, schedule_end_time):
+        """Returns the last completed night consumption in Wh."""
+        if not entity_id:
+            return None, None, None
+
+        state = self.hass.states.get(entity_id)
+        current_energy_wh = self._energy_state_to_wh(state)
+        if current_energy_wh is None:
+            return None, None, None
+
+        is_cumulative = self._is_cumulative_energy_sensor(state, current_energy_wh)
+        if not is_cumulative:
+            return current_energy_wh, "configured_night_consumption_sensor", None
+
+        night_start, night_end = self._last_completed_night_window(
+            schedule_start_time,
+            schedule_end_time
+        )
+        history_dict = await self.hass.async_add_executor_job(
+            history.get_significant_states,
+            self.hass,
+            dt_util.as_utc(night_start),
+            dt_util.as_utc(night_end),
+            [entity_id]
+        )
+        states = history_dict.get(entity_id, [])
+        values = [
+            self._energy_state_to_wh(history_state)
+            for history_state in states
+        ]
+        values = [value for value in values if value is not None]
+
+        if len(values) < 2:
+            return None, None, None
+
+        usage_wh = self._calculate_cumulative_delta_wh(values)
+        if usage_wh <= 0:
+            return None, None, None
+
+        return usage_wh, "history_delta_night_consumption_sensor", (night_start, night_end)
+
+    def _is_cumulative_energy_sensor(self, state, energy_wh):
+        if not state:
+            return False
+
+        state_class = (state.attributes.get("state_class") or "").lower()
+        if state_class in ("total", "total_increasing"):
+            return True
+
+        return energy_wh > 100000.0
+
+    def _last_completed_night_window(self, schedule_start_time, schedule_end_time):
+        now = dt_util.now()
+        start_minutes = self._parse_time_minutes(schedule_start_time, DEFAULT_SCHEDULE_START_TIME)
+        end_minutes = self._parse_time_minutes(schedule_end_time, DEFAULT_SCHEDULE_END_TIME)
+        night_end = now.replace(
+            hour=start_minutes // 60,
+            minute=start_minutes % 60,
+            second=0,
+            microsecond=0
+        )
+
+        if now < night_end:
+            night_end = night_end - timedelta(days=1)
+
+        night_start = (night_end - timedelta(days=1)).replace(
+            hour=end_minutes // 60,
+            minute=end_minutes % 60,
+            second=0,
+            microsecond=0
+        )
+
+        if end_minutes < start_minutes:
+            night_start = night_end.replace(
+                hour=end_minutes // 60,
+                minute=end_minutes % 60,
+                second=0,
+                microsecond=0
+            )
+
+        return night_start, night_end
+
+    def _calculate_cumulative_delta_wh(self, values):
+        if values[-1] >= values[0]:
+            return values[-1] - values[0]
+
+        usage_wh = 0.0
+        previous = values[0]
+        for value in values[1:]:
+            if value >= previous:
+                usage_wh += value - previous
+            previous = value
+
+        return usage_wh
 
     def _parse_time_minutes(self, value, fallback):
         if not value:

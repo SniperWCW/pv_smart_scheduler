@@ -77,8 +77,10 @@ Die Entität `sensor.pv_smart_scheduler_zentrale` liefert unter anderem:
 - `schedule_end_time`: späteste Startzeit für geplante Gerätestarts
 - `battery_night_warning`: `true`, wenn eine Warnung für die Nacht angezeigt werden soll
 - `battery_night_reason`: Diagnose, warum gewarnt oder nicht gewarnt wird
-- `night_usage_estimate_wh`: geschätzter Energiebedarf für 12 Stunden Nacht
+- `night_usage_estimate_wh`: ermittelter oder geschätzter Energiebedarf für die Nacht
 - `night_usage_source`: Quelle der Nachtverbrauchsschätzung
+- `night_usage_window_start`: Start des ausgewerteten Nachtfensters bei kumulierenden Energiesensoren
+- `night_usage_window_end`: Ende des ausgewerteten Nachtfensters bei kumulierenden Energiesensoren
 - `forecast_source_unit`: Einheit des Forecast-Sensors
 - `forecast_remaining_kwh`: verbleibende PV-Energie bei kWh-Forecast
 - `forecast_average_power`: daraus berechnete Durchschnittsleistung
@@ -113,5 +115,5 @@ entity: sensor.pv_smart_scheduler_zentrale
 Nach Updates der Karte kann ein Browser-/App-Cache-Refresh nötig sein. Bei manueller Ressource hilft eine Versionsquery, z. B.:
 
 ```text
-/pv_smart_scheduler/pv-smart-scheduler-card.js?v=0.1.9
+/pv_smart_scheduler/pv-smart-scheduler-card.js?v=0.1.10
 ```
