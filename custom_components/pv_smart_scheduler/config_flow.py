@@ -62,6 +62,20 @@ class PVSmartSchedulerConfigFlow(
                         or entry.options.get("battery_min_soc")
                         or entry.data.get("battery_min_soc")
                         or 25,
+                    "night_consumption_sensor":
+                        user_input.get("night_consumption_sensor")
+                        or entry.options.get("night_consumption_sensor")
+                        or entry.data.get("night_consumption_sensor"),
+                    "schedule_start_time":
+                        user_input.get("schedule_start_time")
+                        or entry.options.get("schedule_start_time")
+                        or entry.data.get("schedule_start_time")
+                        or "05:00",
+                    "schedule_end_time":
+                        user_input.get("schedule_end_time")
+                        or entry.options.get("schedule_end_time")
+                        or entry.data.get("schedule_end_time")
+                        or "23:00",
                     "devices": current_devices
                 }
 
@@ -106,6 +120,15 @@ class PVSmartSchedulerConfigFlow(
 
                 "battery_min_soc":
                     user_input.get("battery_min_soc", 25),
+
+                "night_consumption_sensor":
+                    user_input.get("night_consumption_sensor"),
+
+                "schedule_start_time":
+                    user_input.get("schedule_start_time", "05:00"),
+
+                "schedule_end_time":
+                    user_input.get("schedule_end_time", "23:00"),
 
                 "devices": [
                     {
@@ -154,7 +177,21 @@ class PVSmartSchedulerConfigFlow(
                 "battery_min_soc":
                     entry.data.get("battery_min_soc")
                     or entry.options.get("battery_min_soc")
-                    or 25
+                    or 25,
+
+                "night_consumption_sensor":
+                    entry.data.get("night_consumption_sensor")
+                    or entry.options.get("night_consumption_sensor"),
+
+                "schedule_start_time":
+                    entry.data.get("schedule_start_time")
+                    or entry.options.get("schedule_start_time")
+                    or "05:00",
+
+                "schedule_end_time":
+                    entry.data.get("schedule_end_time")
+                    or entry.options.get("schedule_end_time")
+                    or "23:00"
             }
 
         return self.async_show_form(
@@ -248,6 +285,29 @@ class PVSmartSchedulerConfigFlow(
                 vol.Coerce(int),
                 vol.Range(min=0, max=100)
             ),
+
+            vol.Optional(
+                "night_consumption_sensor",
+                default=defaults.get(
+                    "night_consumption_sensor",
+                    vol.UNDEFINED
+                )
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="sensor",
+                    device_class="energy"
+                )
+            ),
+
+            vol.Required(
+                "schedule_start_time",
+                default=defaults.get("schedule_start_time", "05:00")
+            ): selector.TimeSelector(),
+
+            vol.Required(
+                "schedule_end_time",
+                default=defaults.get("schedule_end_time", "23:00")
+            ): selector.TimeSelector(),
 
             vol.Required(
                 "target_coverage",
@@ -472,7 +532,27 @@ class PVSmartSchedulerOptionsFlowHandler(
             ): vol.All(
                 vol.Coerce(int),
                 vol.Range(min=0, max=100)
-            )
+            ),
+
+            vol.Optional(
+                "night_consumption_sensor",
+                default=data.get("night_consumption_sensor", vol.UNDEFINED)
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="sensor",
+                    device_class="energy"
+                )
+            ),
+
+            vol.Required(
+                "schedule_start_time",
+                default=data.get("schedule_start_time", "05:00")
+            ): selector.TimeSelector(),
+
+            vol.Required(
+                "schedule_end_time",
+                default=data.get("schedule_end_time", "23:00")
+            ): selector.TimeSelector()
         })
 
     def _device_label(self, entity_id):

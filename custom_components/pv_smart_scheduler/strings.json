@@ -12,6 +12,9 @@
           "battery_soc_sensor": "Batterie-SoC",
           "battery_energy_sensor": "Verfügbare Batterie-Energie",
           "battery_min_soc": "Mindest-SoC für Batterie-Nutzung",
+          "night_consumption_sensor": "Hausverbrauch Nacht",
+          "schedule_start_time": "Fr\u00fcheste Startzeit",
+          "schedule_end_time": "Sp\u00e4teste Startzeit",
           "target_coverage": "Gewünschte PV-Abdeckung",
           "priority": "Priorität"
         },
@@ -23,6 +26,9 @@
           "battery_soc_sensor": "Optionaler Batterie-Ladestand in Prozent.",
           "battery_energy_sensor": "Optional verfügbare Batterie-Energie in kWh, die oberhalb des Mindest-SoC eingeplant werden darf.",
           "battery_min_soc": "Unterhalb dieses Ladestands wird die Batterie nicht für Gerätestarts eingeplant.",
+          "night_consumption_sensor": "Optionaler Energiesensor für den letzten Hausverbrauch in der Nacht, idealerweise in kWh.",
+          "schedule_start_time": "Vor dieser Uhrzeit werden keine neuen Gerätestarts geplant.",
+          "schedule_end_time": "Nach dieser Uhrzeit werden keine neuen Gerätestarts geplant.",
           "target_coverage": "Mindestabdeckung in Prozent, die durch PV und nutzbare Batterie erreicht werden soll.",
           "priority": "Niedrige Zahlen werden zuerst eingeplant. Priorität 1 reserviert PV-Leistung vor Priorität 2."
         }
@@ -68,7 +74,10 @@
           "home_base_load_sensor": "Haus-Basislast",
           "battery_soc_sensor": "Batterie-SoC",
           "battery_energy_sensor": "Verfügbare Batterie-Energie",
-          "battery_min_soc": "Mindest-SoC für Batterie-Nutzung"
+          "battery_min_soc": "Mindest-SoC für Batterie-Nutzung",
+          "night_consumption_sensor": "Hausverbrauch Nacht",
+          "schedule_start_time": "Fr\u00fcheste Startzeit",
+          "schedule_end_time": "Sp\u00e4teste Startzeit"
         },
         "data_description": {
           "pv_forecast_sensor": "Sensor für die erwartete PV-Leistung in Watt.",
@@ -76,7 +85,10 @@
           "home_base_load_sensor": "Aktueller Grundverbrauch des Hauses in Watt.",
           "battery_soc_sensor": "Optionaler Batterie-Ladestand in Prozent.",
           "battery_energy_sensor": "Optional verfügbare Batterie-Energie in kWh.",
-          "battery_min_soc": "Unterhalb dieses Ladestands wird die Batterie nicht für Gerätestarts eingeplant."
+          "battery_min_soc": "Unterhalb dieses Ladestands wird die Batterie nicht für Gerätestarts eingeplant.",
+          "night_consumption_sensor": "Optionaler Energiesensor für den letzten Hausverbrauch in der Nacht, idealerweise in kWh.",
+          "schedule_start_time": "Vor dieser Uhrzeit werden keine neuen Gerätestarts geplant.",
+          "schedule_end_time": "Nach dieser Uhrzeit werden keine neuen Gerätestarts geplant."
         }
       },
       "remove_device": {

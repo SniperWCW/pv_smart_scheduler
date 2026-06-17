@@ -8,7 +8,7 @@ Die Integration erzeugt eine zentrale Entität `sensor.pv_smart_scheduler_zentra
 
 ## Funktionen
 
-- Visuelle Gantt-Timeline von 08:00 bis 20:00 Uhr direkt in der Lovelace-Karte
+- Visuelle Gantt-Timeline mit konfigurierbarem Startfenster, standardmäßig 05:00 bis 23:00 Uhr
 - Peak-Finder: sucht den energetisch besten Zeitpunkt, auch wenn keine 100% PV-Deckung erreichbar ist
 - Adaptive Verbrauchsprofile aus der Recorder-Historie der letzten 14 Tage
 - Standby-Filter und robustes Parsing von Leistungswerten aus Status oder Attributen
@@ -17,7 +17,7 @@ Die Integration erzeugt eine zentrale Entität `sensor.pv_smart_scheduler_zentra
 - Berücksichtigung aktueller PV-Produktion in W
 - Berücksichtigung der Haus-Basislast in W
 - Optionale Batterieplanung mit SoC, verfügbarer Energie in kWh und Mindest-SoC
-- Akku-Nacht-Wächter mit Diagnosegrund statt pauschaler Warnung
+- Akku-Nacht-Wächter mit optionalem Nachtverbrauchs-Sensor und Diagnosegrund statt pauschaler Warnung
 - Erkennung bereits laufender Geräte über aktuelle Leistungsaufnahme
 - Geräte nachträglich bearbeiten oder einzeln löschen
 - Lovelace-Karte für die visuelle Anzeige
@@ -36,6 +36,8 @@ Optional:
 - Batterie-SoC in %
 - Verfügbare Batterie-Energie in kWh
 - Mindest-SoC für Batterie-Nutzung
+- Hausverbrauch Nacht in kWh
+- Früheste und späteste Startzeit für neue Gerätestarts
 
 Solcast-Sensoren mit `unit_of_measurement: kWh` werden unterstützt. Die Integration nutzt bevorzugt das Attribut `estimate` als verbleibende PV-Energie und rechnet daraus eine durchschnittlich verfügbare Leistung für den Planungshorizont.
 
@@ -70,9 +72,13 @@ Die Entität `sensor.pv_smart_scheduler_zentrale` liefert unter anderem:
 - `battery_soc`: Batterie-Ladestand
 - `battery_available_kwh`: nutzbare Batterie-Energie
 - `battery_min_soc`: konfigurierte Mindestreserve
+- `night_consumption_sensor`: konfigurierter Sensor für den letzten Nachtverbrauch
+- `schedule_start_time`: früheste Startzeit für geplante Gerätestarts
+- `schedule_end_time`: späteste Startzeit für geplante Gerätestarts
 - `battery_night_warning`: `true`, wenn eine Warnung für die Nacht angezeigt werden soll
 - `battery_night_reason`: Diagnose, warum gewarnt oder nicht gewarnt wird
 - `night_usage_estimate_wh`: geschätzter Energiebedarf für 12 Stunden Nacht
+- `night_usage_source`: Quelle der Nachtverbrauchsschätzung
 - `forecast_source_unit`: Einheit des Forecast-Sensors
 - `forecast_remaining_kwh`: verbleibende PV-Energie bei kWh-Forecast
 - `forecast_average_power`: daraus berechnete Durchschnittsleistung
@@ -107,5 +113,5 @@ entity: sensor.pv_smart_scheduler_zentrale
 Nach Updates der Karte kann ein Browser-/App-Cache-Refresh nötig sein. Bei manueller Ressource hilft eine Versionsquery, z. B.:
 
 ```text
-/pv_smart_scheduler/pv-smart-scheduler-card.js?v=0.1.8
+/pv_smart_scheduler/pv-smart-scheduler-card.js?v=0.1.9
 ```

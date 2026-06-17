@@ -17,6 +17,9 @@ PROFILE_LOOKBACK_DAYS = 14
 DEFAULT_BATTERY_MIN_SOC = 25
 DEVICE_ACTIVE_POWER_THRESHOLD = 15
 FORECAST_HORIZON_MINUTES = 720
+DEFAULT_SCHEDULE_START_TIME = "05:00"
+DEFAULT_SCHEDULE_END_TIME = "23:00"
+DEFAULT_NIGHT_HOURS = 12
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Wird beim allgemeinen Starten von Home Assistant aufgerufen."""
@@ -128,7 +131,16 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                             value.get("battery_energy_sensor"),
 
                         "battery_min_soc":
-                            value.get("battery_min_soc", DEFAULT_BATTERY_MIN_SOC)
+                            value.get("battery_min_soc", DEFAULT_BATTERY_MIN_SOC),
+
+                        "night_consumption_sensor":
+                            value.get("night_consumption_sensor"),
+
+                        "schedule_start_time":
+                            value.get("schedule_start_time", DEFAULT_SCHEDULE_START_TIME),
+
+                        "schedule_end_time":
+                            value.get("schedule_end_time", DEFAULT_SCHEDULE_END_TIME)
                     }
         self.devices_config = new_config
         self.configured_device_count = configured_device_count
@@ -234,6 +246,13 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         battery_soc = self._get_float_state(first_config.get("battery_soc_sensor"))
         battery_energy_kwh = self._get_float_state(first_config.get("battery_energy_sensor"), 0.0)
         battery_min_soc = first_config.get("battery_min_soc", DEFAULT_BATTERY_MIN_SOC)
+        night_consumption_sensor = first_config.get("night_consumption_sensor")
+        schedule_start_time = first_config.get("schedule_start_time", DEFAULT_SCHEDULE_START_TIME)
+        schedule_end_time = first_config.get("schedule_end_time", DEFAULT_SCHEDULE_END_TIME)
+        schedule_start_offset, schedule_end_offset = self._calculate_schedule_window_offsets(
+            schedule_start_time,
+            schedule_end_time
+        )
         battery_available_wh = self._calculate_available_battery_wh(
             battery_soc,
             battery_energy_kwh,
@@ -251,6 +270,9 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             "battery_soc": round(battery_soc, 1) if battery_soc is not None else None,
             "battery_available_kwh": round(battery_available_wh / 1000, 2),
             "battery_min_soc": battery_min_soc,
+            "night_consumption_sensor": night_consumption_sensor,
+            "schedule_start_time": schedule_start_time,
+            "schedule_end_time": schedule_end_time,
             "profile_lookback_days": PROFILE_LOOKBACK_DAYS,
             "configured_device_count": self.configured_device_count,
             "unique_device_count": self.unique_device_count,
@@ -270,8 +292,16 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         clean_base_load = max(0.0, total_base_load - managed_running_power)
 
         # Nachtverbrauchsschätzung (Grob: 12 Stunden Nacht * Basislast)
-        night_usage_wh = clean_base_load * 12
+        configured_night_usage_wh = self._get_energy_state(night_consumption_sensor)
+        if configured_night_usage_wh is not None:
+            night_usage_wh = configured_night_usage_wh
+            night_usage_source = "configured_night_consumption_sensor"
+        else:
+            night_usage_wh = clean_base_load * DEFAULT_NIGHT_HOURS
+            night_usage_source = "current_base_load_fallback"
+
         self.last_context["night_usage_estimate_wh"] = round(night_usage_wh, 1)
+        self.last_context["night_usage_source"] = night_usage_source
         battery_night_warning, battery_night_reason = self._calculate_battery_night_warning(
             battery_soc,
             battery_energy_kwh,
@@ -290,7 +320,13 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                 is_running = current_device_power > DEVICE_ACTIVE_POWER_THRESHOLD
 
                 best_start, max_coverage, battery_used_wh = self._calculate_best_window(
-                    profile, virtual_pv_forecast, clean_base_load, remaining_battery_wh, config.get("target_coverage", 90)
+                    profile,
+                    virtual_pv_forecast,
+                    clean_base_load,
+                    remaining_battery_wh,
+                    config.get("target_coverage", 90),
+                    schedule_start_offset,
+                    schedule_end_offset
                 )
 
                 # Berechne konkrete Uhrzeit
@@ -480,6 +516,63 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         val = self._parse_state_value(state)
         return val if val is not None else fallback
 
+    def _get_energy_state(self, entity_id):
+        """Reads an energy sensor and returns Wh."""
+        if not entity_id:
+            return None
+
+        state = self.hass.states.get(entity_id)
+        val = self._parse_state_value(state)
+        if val is None:
+            return None
+
+        unit = (state.attributes.get("unit_of_measurement") or "").strip().lower()
+        if unit in ("wh", "w h"):
+            return val
+        if unit in ("mwh", "mw h"):
+            return val * 1000000.0
+
+        return val * 1000.0
+
+    def _parse_time_minutes(self, value, fallback):
+        if not value:
+            value = fallback
+
+        if hasattr(value, "hour") and hasattr(value, "minute"):
+            return (int(value.hour) * 60) + int(value.minute)
+
+        try:
+            parts = str(value).split(":")
+            hour = max(0, min(23, int(parts[0])))
+            minute = max(0, min(59, int(parts[1]) if len(parts) > 1 else 0))
+            return (hour * 60) + minute
+        except (TypeError, ValueError, IndexError):
+            fallback_hour, fallback_minute = fallback.split(":", 1)
+            return (int(fallback_hour) * 60) + int(fallback_minute)
+
+    def _calculate_schedule_window_offsets(self, start_time, end_time):
+        """Returns allowed start offsets in minutes relative to now."""
+        now = dt_util.now()
+        now_minutes = (now.hour * 60) + now.minute
+        start_minutes = self._parse_time_minutes(start_time, DEFAULT_SCHEDULE_START_TIME)
+        end_minutes = self._parse_time_minutes(end_time, DEFAULT_SCHEDULE_END_TIME)
+
+        if start_minutes == end_minutes:
+            return 0, FORECAST_HORIZON_MINUTES
+
+        if start_minutes < end_minutes:
+            if now_minutes < start_minutes:
+                return start_minutes - now_minutes, end_minutes - now_minutes
+            if now_minutes <= end_minutes:
+                return 0, end_minutes - now_minutes
+            return (1440 - now_minutes) + start_minutes, (1440 - now_minutes) + end_minutes
+
+        if now_minutes >= start_minutes:
+            return 0, (1440 - now_minutes) + end_minutes
+        if now_minutes <= end_minutes:
+            return 0, end_minutes - now_minutes
+        return start_minutes - now_minutes, (1440 - now_minutes) + end_minutes
+
     def _calculate_available_battery_wh(self, battery_soc, battery_energy_kwh, min_soc):
         """Berechnet die tatsächlich nutzbare Energie oberhalb des Mindest-SoC."""
         if battery_soc is None or battery_soc <= min_soc or battery_soc <= 0 or battery_energy_kwh <= 0:
@@ -533,7 +626,16 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
 
         return forecast
 
-    def _calculate_best_window(self, profile, forecast, base_load, battery_available_wh=0.0, target_coverage=90.0):
+    def _calculate_best_window(
+        self,
+        profile,
+        forecast,
+        base_load,
+        battery_available_wh=0.0,
+        target_coverage=90.0,
+        earliest_start_offset=0,
+        latest_start_offset=FORECAST_HORIZON_MINUTES
+    ):
         """Findet das optimale Zeitfenster unter Berücksichtigung der Zielabdeckung."""
         profile_len = len(profile)
         forecast_len = len(forecast)
@@ -542,8 +644,17 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         
         windows = []
         battery_available_watt_minutes = battery_available_wh * 60
+        latest_start = min(forecast_len - profile_len, max(0, int(latest_start_offset)))
+        earliest_start = max(0, min(int(earliest_start_offset), latest_start))
+        first_start = ((earliest_start + 14) // 15) * 15
+        candidate_starts = []
+        if earliest_start <= latest_start:
+            candidate_starts.append(earliest_start)
+        if first_start == earliest_start:
+            candidate_starts = []
+        candidate_starts.extend(range(first_start, latest_start + 1, 15))
 
-        for start_min in range(0, forecast_len - profile_len, 15):
+        for start_min in candidate_starts:
             total_device_energy = 0
             covered_by_pv_energy = 0
             missing_energy = 0
@@ -570,10 +681,11 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             })
 
         # 1. Falls keine Fenster berechnet werden konnten
-        if not windows: return 0, 0.0, 0.0
+        if not windows:
+            return earliest_start, 0.0, 0.0
 
         # 2. Wenn das aktuelle Fenster (t=0) bereits die Zielabdeckung erreicht -> Sofort starten
-        if windows[0]["coverage"] >= target_coverage:
+        if windows[0]["start"] == 0 and windows[0]["coverage"] >= target_coverage:
             return 0, windows[0]["coverage"], windows[0]["battery_wh"]
 
         # 2. Das erste Fenster finden, das die Zielabdeckung erreicht

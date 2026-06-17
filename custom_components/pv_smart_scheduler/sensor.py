@@ -98,6 +98,9 @@ class PVSmartSchedulerMasterSensor(
             "battery_soc": context.get("battery_soc"),
             "battery_available_kwh": context.get("battery_available_kwh"),
             "battery_min_soc": context.get("battery_min_soc"),
+            "night_consumption_sensor": context.get("night_consumption_sensor"),
+            "schedule_start_time": context.get("schedule_start_time"),
+            "schedule_end_time": context.get("schedule_end_time"),
             "profile_lookback_days": context.get("profile_lookback_days"),
             "configured_device_count": context.get("configured_device_count"),
             "unique_device_count": context.get("unique_device_count"),
@@ -106,7 +109,8 @@ class PVSmartSchedulerMasterSensor(
             "forecast_average_power": context.get("forecast_average_power"),
             "battery_night_warning": context.get("battery_night_warning"),
             "battery_night_reason": context.get("battery_night_reason"),
-            "night_usage_estimate_wh": context.get("night_usage_estimate_wh")
+            "night_usage_estimate_wh": context.get("night_usage_estimate_wh"),
+            "night_usage_source": context.get("night_usage_source")
         }
 
     def _device_display_name(self, entity_id, state):

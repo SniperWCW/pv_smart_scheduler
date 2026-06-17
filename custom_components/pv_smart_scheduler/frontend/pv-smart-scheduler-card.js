@@ -79,9 +79,15 @@ class PVSmartSchedulerCard extends HTMLElement {
 
     let html = '';
     let timelineRowsHtml = '';
-    const timelineAxis = `
-      <div class="timeline-axis"><span>08:00</span><span>12:00</span><span>16:00</span><span>20:00</span></div>
-    `;
+    const timelineStartTime = (this.config && this.config.timeline_start) || stateObj.attributes.schedule_start_time || '05:00';
+    const timelineEndTime = (this.config && this.config.timeline_end) || stateObj.attributes.schedule_end_time || '23:00';
+    const timelineStartMins = this.parseTimeToMinutes(timelineStartTime, '05:00');
+    let timelineEndMins = this.parseTimeToMinutes(timelineEndTime, '23:00');
+    if (timelineEndMins <= timelineStartMins) {
+      timelineEndMins += 1440;
+    }
+    const timelineTotal = timelineEndMins - timelineStartMins;
+    const timelineAxis = this.buildTimelineAxis(timelineStartMins, timelineEndMins);
 
     // Header Infos aktualisieren
     const batSoc = stateObj.attributes.battery_soc;
@@ -99,7 +105,7 @@ class PVSmartSchedulerCard extends HTMLElement {
 
     if (devices.length === 0) {
       html = `<tr><td colspan="4" style="padding: 16px; text-align: center; color: var(--secondary-text-color);">Keine Geräte konfiguriert</td></tr>`;
-      timelineHtml = '';
+      timelineRowsHtml = '';
     } else {
       devices.forEach((device) => {
         const isReady = device.recommendation === 'ja';
@@ -152,33 +158,31 @@ class PVSmartSchedulerCard extends HTMLElement {
           </tr>
         `;
 
-        // Timeline Logik (08:00 - 20:00 Uhr = 720 Minuten Bereich)
-        if (!isRunning && startTimeObj) {
-            const dayStart = new Date(startTimeObj);
-            dayStart.setHours(8, 0, 0, 0);
-            const dayEnd = new Date(startTimeObj);
-            dayEnd.setHours(20, 0, 0, 0);
+        if (!isRunning && startTimeStr && !Number.isNaN(startTimeObj.getTime())) {
+          const startOffset = this.dateToTimelineMinutes(
+            startTimeObj,
+            timelineStartMins,
+            timelineEndMins
+          ) - timelineStartMins;
 
-            const startOffset = (startTimeObj - dayStart) / (1000 * 60); // Minuten seit 08:00
-            const timelineTotal = 720; // 12 Stunden
+          if (startOffset >= 0 && startOffset < timelineTotal) {
+            const visibleDurationMins = Math.max(1, Math.min(durationMins, timelineTotal - startOffset));
+            const left = (startOffset / timelineTotal) * 100;
+            const width = (visibleDurationMins / timelineTotal) * 100;
 
-            if (startOffset >= 0 && startOffset < timelineTotal) {
-                const left = (startOffset / timelineTotal) * 100;
-                const width = (durationMins / timelineTotal) * 100;
-                
-                timelineRowsHtml += `
-                  <div style="display: flex; align-items: center; margin-bottom: 4px;">
-                    <div style="width: 70px; font-size: 9px; color: var(--secondary-text-color); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 4px;">
-                      ${name}
-                    </div>
-                    <div class="timeline-lane">
-                      <div class="device-bar" style="left: ${left}%; width: ${width}%; background: ${statusColor};" title="${name}: ${timeLabel}">
-                        ${width > 15 ? name : ''}
-                      </div>
-                    </div>
+            timelineRowsHtml += `
+              <div style="display: flex; align-items: center; margin-bottom: 4px;">
+                <div style="width: 70px; font-size: 9px; color: var(--secondary-text-color); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 4px;">
+                  ${name}
+                </div>
+                <div class="timeline-lane">
+                  <div class="device-bar" style="left: ${left}%; width: ${width}%; background: ${statusColor};" title="${name}: ${timeLabel}">
+                    ${width > 15 ? name : ''}
                   </div>
-                `;
-            }
+                </div>
+              </div>
+            `;
+          }
         }
       });
     }
@@ -212,6 +216,56 @@ class PVSmartSchedulerCard extends HTMLElement {
       '"': '&quot;',
       "'": '&#039;',
     }[char]));
+  }
+
+  parseTimeToMinutes(value, fallback) {
+    const source = String(value || fallback);
+    const match = source.match(/^(\d{1,2}):(\d{2})/);
+    if (!match) {
+      return this.parseTimeToMinutes(fallback, '05:00');
+    }
+
+    const hours = Math.max(0, Math.min(23, Number(match[1])));
+    const minutes = Math.max(0, Math.min(59, Number(match[2])));
+    return (hours * 60) + minutes;
+  }
+
+  formatTimeLabel(totalMinutes) {
+    const minutesOfDay = ((totalMinutes % 1440) + 1440) % 1440;
+    const hours = Math.floor(minutesOfDay / 60);
+    const minutes = minutesOfDay % 60;
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+  }
+
+  buildTimelineAxis(startMins, endMins) {
+    const total = endMins - startMins;
+    const step = total <= 480 ? 120 : (total <= 720 ? 180 : 240);
+    const ticks = [startMins];
+    let nextTick = Math.ceil(startMins / step) * step;
+
+    while (nextTick < endMins) {
+      if (nextTick !== startMins) {
+        ticks.push(nextTick);
+      }
+      nextTick += step;
+    }
+
+    if (ticks[ticks.length - 1] !== endMins) {
+      ticks.push(endMins);
+    }
+
+    return `<div class="timeline-axis">${ticks.map((tick) => `<span>${this.formatTimeLabel(tick)}</span>`).join('')}</div>`;
+  }
+
+  dateToTimelineMinutes(date, startMins, endMins) {
+    let minutes = (date.getHours() * 60) + date.getMinutes();
+    while (minutes < startMins) {
+      minutes += 1440;
+    }
+    while (minutes > endMins && minutes - 1440 >= startMins) {
+      minutes -= 1440;
+    }
+    return minutes;
   }
 
   getDeviceIcon(name) {
