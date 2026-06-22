@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.1
+
+- Added optional per-device state sensor for more reliable running-state detection.
+- Fixed Lovelace card running-state display so backend `is_running` is authoritative.
+- Added diagnostic attributes for configured global sensors, device power state and optional device state sensor.
+- Improved managed-load cleanup by respecting the optional device state sensor.
+- Updated README and technical documentation for device state handling.
+
 ## v0.2.0
 
 - Added future PV and battery reservation for cascading device priorities.

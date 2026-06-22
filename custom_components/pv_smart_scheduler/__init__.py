@@ -109,6 +109,9 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                 if entity_id:
                     configured_device_count += 1
                     new_config[entity_id] = {
+                        "device_state_sensor":
+                            device.get("device_state_sensor"),
+
                         "target_coverage":
                             device.get("target_coverage", 90),
 
@@ -243,6 +246,42 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         except (TypeError, ValueError, IndexError):
             return None
 
+    def _is_device_running(self, current_power, state_sensor_state=None):
+        """Returns device activity using an optional state sensor, otherwise power."""
+        if state_sensor_state is not None:
+            raw_state = str(state_sensor_state.state or "").lower()
+            inactive_states = {
+                "off",
+                "idle",
+                "standby",
+                "unavailable",
+                "unknown",
+                "0",
+                "false",
+                "closed"
+            }
+            active_states = {
+                "on",
+                "open",
+                "true",
+                "running",
+                "active",
+                "cool",
+                "cooling",
+                "heat",
+                "heating",
+                "dry",
+                "fan_only",
+                "auto"
+            }
+
+            if raw_state in inactive_states:
+                return False
+            if raw_state in active_states:
+                return True
+
+        return current_power > DEVICE_ACTIVE_POWER_THRESHOLD
+
     async def _async_update_data(self):
         results = {}
         if not self.devices_config:
@@ -283,6 +322,12 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         )
         remaining_battery_wh = battery_available_wh
         self.last_context = {
+            "pv_forecast_sensor": first_config.get("pv_forecast_sensor"),
+            "home_base_load_sensor": first_config.get("home_base_load_sensor"),
+            "pv_current_power_sensor": first_config.get("pv_current_power_sensor"),
+            "battery_soc_sensor": first_config.get("battery_soc_sensor"),
+            "battery_energy_sensor": first_config.get("battery_energy_sensor"),
+            "battery_capacity_sensor": first_config.get("battery_capacity_sensor"),
             "pv_current_power": round(current_pv_power, 1),
             "battery_soc": round(battery_soc, 1) if battery_soc is not None else None,
             "battery_available_kwh": round(battery_available_wh / 1000, 2),
@@ -305,9 +350,11 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         # laufende, vom Scheduler gesteuerte Geräte entfällt.
         total_base_load = self._get_float_state(first_config.get("home_base_load_sensor"), 300.0)
         managed_running_power = 0.0
-        for dev_id in self.devices_config:
+        for dev_id, device_config in self.devices_config.items():
             p = self._get_float_state(dev_id, 0.0)
-            if p > DEVICE_ACTIVE_POWER_THRESHOLD:
+            state_sensor_id = device_config.get("device_state_sensor")
+            state_sensor_state = self.hass.states.get(state_sensor_id) if state_sensor_id else None
+            if self._is_device_running(p, state_sensor_state):
                 managed_running_power += p
         
         # Die "echte" Basislast ist der Hausverbrauch minus die gesteuerten Geräte.
@@ -350,7 +397,12 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                 profile = await self._get_adaptive_profile(entity_id)
                 state = self.hass.states.get(entity_id)
                 current_device_power = self._parse_state_value(state) or 0.0
-                is_running = current_device_power > DEVICE_ACTIVE_POWER_THRESHOLD
+                device_state_sensor = config.get("device_state_sensor")
+                state_sensor_state = self.hass.states.get(device_state_sensor) if device_state_sensor else None
+                is_running = self._is_device_running(
+                    current_device_power,
+                    state_sensor_state
+                )
 
                 best_start, max_coverage, battery_used_wh = self._calculate_best_window(
                     profile,
@@ -383,6 +435,12 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                     "recommendation": recommendation,
                     "is_running": is_running,
                     "current_power": round(current_device_power, 1),
+                    "power_state": state.state if state else None,
+                    "power_unit": state.attributes.get("unit_of_measurement") if state else None,
+                    "power_last_updated": state.last_updated.isoformat() if state else None,
+                    "device_state_sensor": device_state_sensor,
+                    "device_state": state_sensor_state.state if state_sensor_state else None,
+                    "device_state_last_updated": state_sensor_state.last_updated.isoformat() if state_sensor_state else None,
                     "best_start_mins": best_start,
                     "coverage_percent": round(max_coverage, 1),
                     "total_kwh": round(total_kwh, 2),

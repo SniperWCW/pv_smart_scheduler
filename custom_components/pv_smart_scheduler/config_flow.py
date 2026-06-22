@@ -35,6 +35,7 @@ class PVSmartSchedulerConfigFlow(
 
                 current_devices.append({
                     "device_power_sensor": user_input["device_power_sensor"],
+                    "device_state_sensor": user_input.get("device_state_sensor"),
                     "target_coverage": user_input["target_coverage"],
                     "priority": user_input["priority"]
                 })
@@ -170,6 +171,9 @@ class PVSmartSchedulerConfigFlow(
                         "device_power_sensor":
                             user_input["device_power_sensor"],
 
+                        "device_state_sensor":
+                            user_input.get("device_state_sensor"),
+
                         "target_coverage":
                             user_input["target_coverage"],
 
@@ -267,6 +271,12 @@ class PVSmartSchedulerConfigFlow(
                     domain="sensor",
                     device_class="power"
                 )
+            ),
+
+            vol.Optional(
+                "device_state_sensor"
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig()
             ),
 
             vol.Required(
@@ -499,6 +509,7 @@ class PVSmartSchedulerOptionsFlowHandler(
                 if device.get("device_power_sensor") == self._selected_device_id:
                     new_devices.append({
                         "device_power_sensor": user_input["device_power_sensor"],
+                        "device_state_sensor": user_input.get("device_state_sensor"),
                         "target_coverage": user_input["target_coverage"],
                         "priority": user_input["priority"]
                     })
@@ -517,6 +528,12 @@ class PVSmartSchedulerOptionsFlowHandler(
                 default=current_device["device_power_sensor"]
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor", device_class="power")
+            ),
+            vol.Optional(
+                "device_state_sensor",
+                default=current_device.get("device_state_sensor", vol.UNDEFINED)
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig()
             ),
             vol.Required(
                 "target_coverage", 

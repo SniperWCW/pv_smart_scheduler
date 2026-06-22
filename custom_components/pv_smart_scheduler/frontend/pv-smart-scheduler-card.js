@@ -110,7 +110,9 @@ class PVSmartSchedulerCard extends HTMLElement {
       devices.forEach((device) => {
         const isReady = device.recommendation === 'ja';
         const currentPower = this.getFirstNumber(device, ['current_power'], 0);
-        const isRunning = (device.is_running === true || device.recommendation === 'läuft' || currentPower > 15) && currentPower > 2;
+        const isRunning = device.is_running !== undefined
+          ? device.is_running === true
+          : ((device.recommendation === 'läuft' || currentPower > 15) && currentPower > 2);
         const startMins = this.getFirstNumber(device, ['best_start_mins'], 0);
         const durationMins = this.getFirstNumber(device, ['duration_mins'], 120);
         const startTimeStr = device.best_start_time;

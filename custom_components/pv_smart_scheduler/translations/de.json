@@ -6,6 +6,7 @@
         "description": "Wähle die Sensoren für PV-Prognose, aktuellen Verbrauch, Batterie und das zu planende Gerät.",
         "data": {
           "device_power_sensor": "Geräte-Leistungssensor",
+          "device_state_sensor": "Geräte-Statussensor",
           "pv_forecast_sensor": "PV-Prognosesensor",
           "pv_current_power_sensor": "Aktuelle PV-Leistung",
           "home_base_load_sensor": "Haus-Basislast",
@@ -25,6 +26,7 @@
         },
         "data_description": {
           "device_power_sensor": "Leistungssensor des Geräts in Watt, z. B. Waschmaschine, Trockner oder Pool.",
+          "device_state_sensor": "Optionaler Statussensor des Geräts, z. B. climate-, switch- oder binary_sensor-Entität. Wenn gesetzt, entscheidet dieser Sensor den Laufstatus.",
           "pv_forecast_sensor": "Sensor für die erwartete PV-Leistung in Watt. Wird für die Planung der nächsten Stunden verwendet.",
           "pv_current_power_sensor": "Optionaler Sensor für die aktuelle PV-Produktion in Watt. Verbessert Entscheidungen bei aktueller Sonne.",
           "home_base_load_sensor": "Aktueller Grundverbrauch des Hauses in Watt. Dieser Verbrauch wird von der PV-Leistung abgezogen.",
@@ -71,6 +73,7 @@
         "description": "Passe die Entität, Priorität oder Zielabdeckung für dieses Gerät an.",
         "data": {
           "device_power_sensor": "Geräte-Leistungssensor",
+          "device_state_sensor": "Geräte-Statussensor",
           "target_coverage": "Gewünschte PV-Abdeckung",
           "priority": "Priorität"
         }

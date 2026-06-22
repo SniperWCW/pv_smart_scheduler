@@ -33,6 +33,7 @@ Pflicht:
 
 Optional:
 
+- Geraete-Statussensor, z. B. `climate.*`, `switch.*` oder `binary_sensor.*`
 - Aktuelle PV-Leistung in W
 - Batterie-SoC in %
 - Batterie-Gesamtkapazitaet in kWh
@@ -101,6 +102,10 @@ Pro Geraet werden unter anderem geliefert:
 - `recommendation`: `ja`, `warten` oder `laeuft`
 - `is_running`: Geraet laeuft aktuell
 - `current_power`: aktuelle Leistung des Geraets
+- `power_state`: Rohzustand des konfigurierten Leistungssensors
+- `power_last_updated`: letzter Update-Zeitpunkt des Leistungssensors
+- `device_state_sensor`: optionaler Statussensor des Geraets
+- `device_state`: Rohzustand des Statussensors
 - `best_start_time`: konkreter ISO-Zeitstempel fuer den geplanten Start
 - `best_start_mins`: Minuten bis zum Start
 - `duration_mins`: erwartete Programmdauer basierend auf dem gelernten Profil

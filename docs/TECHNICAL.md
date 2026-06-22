@@ -55,6 +55,24 @@ Fallback:
 - Wenn kein brauchbares Profil existiert, wird `[300] * 120` verwendet.
 - Das entspricht 120 Minuten bei 300 W.
 
+## Laufstatus
+
+Der Laufstatus wird in `_is_device_running(...)` bestimmt.
+
+Standard:
+
+- Ohne optionalen Statussensor gilt ein Geraet als laufend, wenn die aktuelle Leistung ueber `DEVICE_ACTIVE_POWER_THRESHOLD` liegt.
+
+Optionaler Statussensor:
+
+- Pro Geraet kann `device_state_sensor` konfiguriert werden.
+- Das kann z. B. eine `climate.*`-, `switch.*`- oder `binary_sensor.*`-Entitaet sein.
+- Wenn dieser Sensor gesetzt ist, entscheidet sein Zustand den Laufstatus.
+- Typische inaktive Zustaende sind `off`, `idle`, `standby`, `unavailable`, `unknown`, `false` und `0`.
+- Typische aktive Zustaende sind `on`, `running`, `active`, `cool`, `heat`, `dry`, `fan_only` und `auto`.
+
+Das ist besonders fuer Klimaanlagen wichtig, weil der Leistungswert kurzfristig 0 W oder veraltet sein kann, obwohl das Geraet aus Home-Assistant-Sicht eingeschaltet ist.
+
 ## PV-Forecast
 
 Der Forecast wird in `_get_pv_forecast(...)` in eine Liste von Wattwerten mit 720 Minuten Horizont umgerechnet.
@@ -216,6 +234,12 @@ Geraeteattribute in `devices`:
 - `recommendation`
 - `is_running`
 - `current_power`
+- `power_state`
+- `power_unit`
+- `power_last_updated`
+- `device_state_sensor`
+- `device_state`
+- `device_state_last_updated`
 - `best_start_mins`
 - `best_start_time`
 - `duration_mins`
