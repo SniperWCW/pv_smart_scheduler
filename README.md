@@ -34,12 +34,19 @@ Optional:
 
 - Aktuelle PV-Leistung in W
 - Batterie-SoC in %
+- Batterie-GesamtkapazitÃ¤t in kWh
+- Batterie-Ladeleistung in W
+- Batterie-Entladeleistung in W
+- Netzbezug als kumulierender kWh-ZÃ¤hler
+- Netzeinspeisung als kumulierender kWh-ZÃ¤hler
 - Verfügbare Batterie-Energie in kWh
 - Mindest-SoC für Batterie-Nutzung
 - Hausverbrauch Nacht in kWh
 - Früheste und späteste Startzeit für neue Gerätestarts
 
 Solcast-Sensoren mit `unit_of_measurement: kWh` werden unterstützt. Die Integration nutzt bevorzugt das Attribut `estimate` als verbleibende PV-Energie und rechnet daraus eine durchschnittlich verfügbare Leistung für den Planungshorizont.
+
+Wenn ein Solcast-Sensor ein `detailedForecast`-Attribut liefert, nutzt die Integration diese zeitaufgeloesten 30-Minuten-Werte direkt fuer die Startzeitberechnung.
 
 ## Einrichtung
 
@@ -71,6 +78,11 @@ Die Entität `sensor.pv_smart_scheduler_zentrale` liefert unter anderem:
 - `pv_current_power`: aktuelle PV-Leistung
 - `battery_soc`: Batterie-Ladestand
 - `battery_available_kwh`: nutzbare Batterie-Energie
+- `battery_capacity_kwh`: konfigurierte oder erkannte Batterie-GesamtkapazitÃ¤t
+- `battery_charge_power`: aktuelle Batterie-Ladeleistung
+- `battery_discharge_power`: aktuelle Batterie-Entladeleistung
+- `grid_import_energy_kwh`: aktueller Stand des NetzbezugszÃ¤hlers
+- `grid_export_energy_kwh`: aktueller Stand des EinspeisezÃ¤hlers
 - `battery_min_soc`: konfigurierte Mindestreserve
 - `night_consumption_sensor`: konfigurierter Sensor für den letzten Nachtverbrauch
 - `schedule_start_time`: früheste Startzeit für geplante Gerätestarts

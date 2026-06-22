@@ -57,6 +57,26 @@ class PVSmartSchedulerConfigFlow(
                         user_input.get("battery_energy_sensor")
                         or entry.options.get("battery_energy_sensor")
                         or entry.data.get("battery_energy_sensor"),
+                    "battery_capacity_sensor":
+                        user_input.get("battery_capacity_sensor")
+                        or entry.options.get("battery_capacity_sensor")
+                        or entry.data.get("battery_capacity_sensor"),
+                    "battery_charge_power_sensor":
+                        user_input.get("battery_charge_power_sensor")
+                        or entry.options.get("battery_charge_power_sensor")
+                        or entry.data.get("battery_charge_power_sensor"),
+                    "battery_discharge_power_sensor":
+                        user_input.get("battery_discharge_power_sensor")
+                        or entry.options.get("battery_discharge_power_sensor")
+                        or entry.data.get("battery_discharge_power_sensor"),
+                    "grid_import_energy_sensor":
+                        user_input.get("grid_import_energy_sensor")
+                        or entry.options.get("grid_import_energy_sensor")
+                        or entry.data.get("grid_import_energy_sensor"),
+                    "grid_export_energy_sensor":
+                        user_input.get("grid_export_energy_sensor")
+                        or entry.options.get("grid_export_energy_sensor")
+                        or entry.data.get("grid_export_energy_sensor"),
                     "battery_min_soc":
                         user_input.get("battery_min_soc")
                         or entry.options.get("battery_min_soc")
@@ -118,6 +138,21 @@ class PVSmartSchedulerConfigFlow(
                 "battery_energy_sensor":
                     user_input.get("battery_energy_sensor"),
 
+                "battery_capacity_sensor":
+                    user_input.get("battery_capacity_sensor"),
+
+                "battery_charge_power_sensor":
+                    user_input.get("battery_charge_power_sensor"),
+
+                "battery_discharge_power_sensor":
+                    user_input.get("battery_discharge_power_sensor"),
+
+                "grid_import_energy_sensor":
+                    user_input.get("grid_import_energy_sensor"),
+
+                "grid_export_energy_sensor":
+                    user_input.get("grid_export_energy_sensor"),
+
                 "battery_min_soc":
                     user_input.get("battery_min_soc", 25),
 
@@ -173,6 +208,26 @@ class PVSmartSchedulerConfigFlow(
                 "battery_energy_sensor":
                     entry.data.get("battery_energy_sensor")
                     or entry.options.get("battery_energy_sensor"),
+
+                "battery_capacity_sensor":
+                    entry.data.get("battery_capacity_sensor")
+                    or entry.options.get("battery_capacity_sensor"),
+
+                "battery_charge_power_sensor":
+                    entry.data.get("battery_charge_power_sensor")
+                    or entry.options.get("battery_charge_power_sensor"),
+
+                "battery_discharge_power_sensor":
+                    entry.data.get("battery_discharge_power_sensor")
+                    or entry.options.get("battery_discharge_power_sensor"),
+
+                "grid_import_energy_sensor":
+                    entry.data.get("grid_import_energy_sensor")
+                    or entry.options.get("grid_import_energy_sensor"),
+
+                "grid_export_energy_sensor":
+                    entry.data.get("grid_export_energy_sensor")
+                    or entry.options.get("grid_export_energy_sensor"),
 
                 "battery_min_soc":
                     entry.data.get("battery_min_soc")
@@ -269,6 +324,71 @@ class PVSmartSchedulerConfigFlow(
                 "battery_energy_sensor",
                 default=defaults.get(
                     "battery_energy_sensor",
+                    vol.UNDEFINED
+                )
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="sensor",
+                    device_class="energy"
+                )
+            ),
+
+            vol.Optional(
+                "battery_capacity_sensor",
+                default=defaults.get(
+                    "battery_capacity_sensor",
+                    vol.UNDEFINED
+                )
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="sensor",
+                    device_class="energy"
+                )
+            ),
+
+            vol.Optional(
+                "battery_charge_power_sensor",
+                default=defaults.get(
+                    "battery_charge_power_sensor",
+                    vol.UNDEFINED
+                )
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="sensor",
+                    device_class="power"
+                )
+            ),
+
+            vol.Optional(
+                "battery_discharge_power_sensor",
+                default=defaults.get(
+                    "battery_discharge_power_sensor",
+                    vol.UNDEFINED
+                )
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="sensor",
+                    device_class="power"
+                )
+            ),
+
+            vol.Optional(
+                "grid_import_energy_sensor",
+                default=defaults.get(
+                    "grid_import_energy_sensor",
+                    vol.UNDEFINED
+                )
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="sensor",
+                    device_class="energy"
+                )
+            ),
+
+            vol.Optional(
+                "grid_export_energy_sensor",
+                default=defaults.get(
+                    "grid_export_energy_sensor",
                     vol.UNDEFINED
                 )
             ): selector.EntitySelector(
@@ -519,6 +639,56 @@ class PVSmartSchedulerOptionsFlowHandler(
             vol.Optional(
                 "battery_energy_sensor",
                 default=data.get("battery_energy_sensor", vol.UNDEFINED)
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="sensor",
+                    device_class="energy"
+                )
+            ),
+
+            vol.Optional(
+                "battery_capacity_sensor",
+                default=data.get("battery_capacity_sensor", vol.UNDEFINED)
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="sensor",
+                    device_class="energy"
+                )
+            ),
+
+            vol.Optional(
+                "battery_charge_power_sensor",
+                default=data.get("battery_charge_power_sensor", vol.UNDEFINED)
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="sensor",
+                    device_class="power"
+                )
+            ),
+
+            vol.Optional(
+                "battery_discharge_power_sensor",
+                default=data.get("battery_discharge_power_sensor", vol.UNDEFINED)
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="sensor",
+                    device_class="power"
+                )
+            ),
+
+            vol.Optional(
+                "grid_import_energy_sensor",
+                default=data.get("grid_import_energy_sensor", vol.UNDEFINED)
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="sensor",
+                    device_class="energy"
+                )
+            ),
+
+            vol.Optional(
+                "grid_export_energy_sensor",
+                default=data.get("grid_export_energy_sensor", vol.UNDEFINED)
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(
                     domain="sensor",

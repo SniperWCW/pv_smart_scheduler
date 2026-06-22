@@ -130,6 +130,21 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                         "battery_energy_sensor":
                             value.get("battery_energy_sensor"),
 
+                        "battery_capacity_sensor":
+                            value.get("battery_capacity_sensor"),
+
+                        "battery_charge_power_sensor":
+                            value.get("battery_charge_power_sensor"),
+
+                        "battery_discharge_power_sensor":
+                            value.get("battery_discharge_power_sensor"),
+
+                        "grid_import_energy_sensor":
+                            value.get("grid_import_energy_sensor"),
+
+                        "grid_export_energy_sensor":
+                            value.get("grid_export_energy_sensor"),
+
                         "battery_min_soc":
                             value.get("battery_min_soc", DEFAULT_BATTERY_MIN_SOC),
 
@@ -245,6 +260,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         current_pv_power = self._get_float_state(first_config.get("pv_current_power_sensor"), 0.0)
         battery_soc = self._get_float_state(first_config.get("battery_soc_sensor"))
         battery_energy_kwh = self._get_float_state(first_config.get("battery_energy_sensor"), 0.0)
+        battery_capacity_kwh = self._get_float_state(first_config.get("battery_capacity_sensor"))
         battery_min_soc = first_config.get("battery_min_soc", DEFAULT_BATTERY_MIN_SOC)
         night_consumption_sensor = first_config.get("night_consumption_sensor")
         schedule_start_time = first_config.get("schedule_start_time", DEFAULT_SCHEDULE_START_TIME)
@@ -256,6 +272,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         battery_available_wh = self._calculate_available_battery_wh(
             battery_soc,
             battery_energy_kwh,
+            battery_capacity_kwh,
             battery_min_soc
         )
 
@@ -269,7 +286,12 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             "pv_current_power": round(current_pv_power, 1),
             "battery_soc": round(battery_soc, 1) if battery_soc is not None else None,
             "battery_available_kwh": round(battery_available_wh / 1000, 2),
+            "battery_capacity_kwh": round(battery_capacity_kwh, 2) if battery_capacity_kwh is not None else None,
             "battery_min_soc": battery_min_soc,
+            "battery_charge_power": self._get_float_state(first_config.get("battery_charge_power_sensor")),
+            "battery_discharge_power": self._get_float_state(first_config.get("battery_discharge_power_sensor")),
+            "grid_import_energy_kwh": self._energy_wh_to_kwh(self._get_energy_state(first_config.get("grid_import_energy_sensor"))),
+            "grid_export_energy_kwh": self._energy_wh_to_kwh(self._get_energy_state(first_config.get("grid_export_energy_sensor"))),
             "night_consumption_sensor": night_consumption_sensor,
             "schedule_start_time": schedule_start_time,
             "schedule_end_time": schedule_end_time,
@@ -315,6 +337,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         battery_night_warning, battery_night_reason = self._calculate_battery_night_warning(
             battery_soc,
             battery_energy_kwh,
+            battery_capacity_kwh,
             battery_available_wh,
             night_usage_wh,
             battery_min_soc
@@ -357,7 +380,8 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                     "duration_mins": duration_mins,
                     "best_start_time": start_time.isoformat(),
                     "weather_stability": round(weather_stability * 100, 0),
-                    "priority": config["priority"]
+                    "priority": config["priority"],
+                    "target_coverage": config.get("target_coverage", 90)
                 }
 
                 # Reserviere PV-Leistung und Batterie für dieses Gerät, wenn es läuft oder jetzt starten soll
@@ -369,7 +393,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
 
             except Exception as err:
                 _LOGGER.error(f"Fehler bei Berechnung für {entity_id}: {err}")
-                results[entity_id] = {"recommendation": "warten", "is_running": False, "current_power": 0.0, "best_start_mins": 0, "coverage_percent": 0, "total_kwh": 0, "duration_mins": 0, "weather_stability": 80, "priority": config["priority"], "best_start_time": None}
+                results[entity_id] = {"recommendation": "warten", "is_running": False, "current_power": 0.0, "best_start_mins": 0, "coverage_percent": 0, "total_kwh": 0, "duration_mins": 0, "weather_stability": 80, "priority": config["priority"], "target_coverage": config.get("target_coverage", 90), "best_start_time": None}
                 
         return results
 
@@ -493,6 +517,17 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         unit = state.attributes.get("unit_of_measurement")
         context["forecast_source_unit"] = unit
 
+        detailed_forecast = state.attributes.get("detailedForecast")
+        if isinstance(detailed_forecast, list):
+            forecast = self._forecast_from_detailed_intervals(detailed_forecast)
+            if forecast:
+                context["forecast_average_power"] = round(sum(forecast) / len(forecast), 1)
+                try:
+                    context["forecast_remaining_kwh"] = round(float(state.attributes.get("estimate", state.state)), 3)
+                except (TypeError, ValueError):
+                    context["forecast_remaining_kwh"] = None
+                return forecast, context
+
         try:
             forecast_value = float(state.attributes.get("estimate", state.state))
         except (TypeError, ValueError):
@@ -508,6 +543,51 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         context["forecast_average_power"] = round(forecast_value, 1)
         # Weniger aggressiver Abfall für den Fallback-Forecast
         return [max(0, forecast_value - (i * 1.5)) for i in range(FORECAST_HORIZON_MINUTES)], context
+
+    def _forecast_from_detailed_intervals(self, intervals):
+        """Builds a 1-minute W forecast from Solcast-style kWh intervals."""
+        now = dt_util.now()
+        horizon_end = now + timedelta(minutes=FORECAST_HORIZON_MINUTES)
+        parsed = []
+
+        for item in intervals:
+            if not isinstance(item, dict):
+                continue
+
+            start = dt_util.parse_datetime(str(item.get("period_start")))
+            if start is None:
+                continue
+            if start.tzinfo is None:
+                start = dt_util.as_local(start)
+
+            try:
+                estimate_kwh = float(item.get("pv_estimate", 0.0))
+            except (TypeError, ValueError):
+                estimate_kwh = 0.0
+
+            parsed.append((start, estimate_kwh))
+
+        parsed.sort(key=lambda value: value[0])
+        if len(parsed) < 2:
+            return None
+
+        forecast = [0.0] * FORECAST_HORIZON_MINUTES
+        for index, (start, estimate_kwh) in enumerate(parsed):
+            next_start = parsed[index + 1][0] if index + 1 < len(parsed) else start + timedelta(minutes=30)
+            interval_minutes = max(1, int((next_start - start).total_seconds() / 60))
+            average_power = max(0.0, estimate_kwh * 1000.0 / (interval_minutes / 60.0))
+
+            overlap_start = max(start, now)
+            overlap_end = min(next_start, horizon_end)
+            if overlap_end <= overlap_start:
+                continue
+
+            start_offset = max(0, int((overlap_start - now).total_seconds() / 60))
+            end_offset = min(FORECAST_HORIZON_MINUTES, int((overlap_end - now).total_seconds() / 60))
+            for minute in range(start_offset, end_offset):
+                forecast[minute] = average_power
+
+        return forecast
 
     def _remaining_daylight_minutes(self):
         now = dt_util.now()
@@ -533,6 +613,12 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
 
         state = self.hass.states.get(entity_id)
         return self._energy_state_to_wh(state)
+
+    def _energy_wh_to_kwh(self, value_wh):
+        if value_wh is None:
+            return None
+
+        return round(value_wh / 1000.0, 3)
 
     def _energy_state_to_wh(self, state):
         val = self._parse_state_value(state)
@@ -681,15 +767,22 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             return 0, end_minutes - now_minutes
         return start_minutes - now_minutes, (1440 - now_minutes) + end_minutes
 
-    def _calculate_available_battery_wh(self, battery_soc, battery_energy_kwh, min_soc):
+    def _calculate_available_battery_wh(self, battery_soc, battery_energy_kwh, battery_capacity_kwh, min_soc):
         """Berechnet die tatsächlich nutzbare Energie oberhalb des Mindest-SoC."""
-        if battery_soc is None or battery_soc <= min_soc or battery_soc <= 0 or battery_energy_kwh <= 0:
+        if battery_soc is None or battery_soc <= min_soc or battery_soc <= 0:
             return 0.0
 
         try:
             # Berechnung der Gesamtkapazität basierend auf aktuellem Stand und SoC.
             # Wenn z.B. 5kWh bei 50% SoC im Speicher sind, beträgt die Gesamtkapazität 10kWh.
-            total_capacity = battery_energy_kwh / (battery_soc / 100.0)
+            if battery_capacity_kwh and battery_capacity_kwh > 0:
+                total_capacity = battery_capacity_kwh
+                battery_energy_kwh = total_capacity * (battery_soc / 100.0)
+            elif battery_energy_kwh and battery_energy_kwh > 0:
+                # Fallback: der alte Sensor wird als aktuell gespeicherte Energie interpretiert.
+                total_capacity = battery_energy_kwh / (battery_soc / 100.0)
+            else:
+                return 0.0
             # Die Energie, die dem Mindest-SoC entspricht, ist nicht für den Scheduler verfügbar.
             min_energy_limit = total_capacity * (min_soc / 100.0)
             usable_kwh = max(0.0, battery_energy_kwh - min_energy_limit)
@@ -701,6 +794,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         self,
         battery_soc,
         battery_energy_kwh,
+        battery_capacity_kwh,
         battery_available_wh,
         night_usage_wh,
         min_soc
@@ -709,7 +803,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         if battery_soc is None:
             return False, "Kein Batterie-SoC konfiguriert"
 
-        if battery_energy_kwh and battery_energy_kwh > 0:
+        if (battery_capacity_kwh and battery_capacity_kwh > 0) or (battery_energy_kwh and battery_energy_kwh > 0):
             if battery_available_wh < night_usage_wh:
                 return True, "Nutzbare Batterieenergie reicht rechnerisch nicht für die Nacht"
             return False, "Nutzbare Batterieenergie reicht rechnerisch für die Nacht"

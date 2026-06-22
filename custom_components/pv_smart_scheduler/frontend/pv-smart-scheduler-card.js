@@ -148,7 +148,7 @@ class PVSmartSchedulerCard extends HTMLElement {
             </td>
             <td style="padding: 10px 4px; text-align: center;">
               <span style="background: ${statusColor}22; color: ${statusColor}; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; display: inline-block; min-width: 80px;">
-                ${bestStartDisplay} ${!isRunning && pvCoverage < (stateObj.attributes.target_coverage || 80) ? '⚠️' : ''}
+                ${bestStartDisplay} ${!isRunning && pvCoverage < (device.target_coverage || 80) ? '⚠️' : ''}
               </span>
             </td>
             <td style="padding: 10px 4px; text-align: right; font-weight: bold; color: ${statusColor};">
