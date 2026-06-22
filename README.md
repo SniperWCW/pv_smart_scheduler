@@ -2,31 +2,32 @@
 
 ![PV Smart Scheduler Banner](images/banner.png)
 
-PV Smart Scheduler ist eine Home Assistant Custom Integration zur PV-optimierten Planung von Haushaltsgeräten wie Waschmaschine, Trockner, Pool, Klimaanlage oder Whirlpool.
+PV Smart Scheduler ist eine Home Assistant Custom Integration zur PV-optimierten Planung von Haushaltsgeraeten wie Waschmaschine, Trockner, Pool, Klimaanlage oder Whirlpool.
 
-Die Integration erzeugt eine zentrale Entität `sensor.pv_smart_scheduler_zentrale`. Diese enthält eine priorisierte Geräteliste mit Startempfehlung, PV-Deckung, erwarteter Energie, Batterienutzung, Laufstatus und Diagnosewerten.
+Die Integration erzeugt eine zentrale Entitaet `sensor.pv_smart_scheduler_zentrale`. Diese enthaelt eine priorisierte Geraeteliste mit Startempfehlung, PV-Deckung, erwarteter Energie, Batterienutzung, Laufstatus und Diagnosewerten.
 
 ## Funktionen
 
-- Visuelle Gantt-Timeline mit konfigurierbarem Startfenster, standardmäßig 05:00 bis 23:00 Uhr
+- Visuelle Gantt-Timeline mit konfigurierbarem Startfenster, standardmaessig 05:00 bis 23:00 Uhr
 - Peak-Finder: sucht den energetisch besten Zeitpunkt, auch wenn keine 100% PV-Deckung erreichbar ist
 - Adaptive Verbrauchsprofile aus der Recorder-Historie der letzten 14 Tage
 - Standby-Filter und robustes Parsing von Leistungswerten aus Status oder Attributen
 - 12-Stunden-Planungshorizont mit kaskadierender Priorisierung
-- Unterstützung für PV-Prognosen in W und Solcast-Restenergie in kWh
-- Berücksichtigung aktueller PV-Produktion in W
-- Berücksichtigung der Haus-Basislast in W
-- Optionale Batterieplanung mit SoC, verfügbarer Energie in kWh und Mindest-SoC
-- Akku-Nacht-Wächter mit optionalem Nachtverbrauchs-Sensor und Diagnosegrund statt pauschaler Warnung
-- Erkennung bereits laufender Geräte über aktuelle Leistungsaufnahme
-- Geräte nachträglich bearbeiten oder einzeln löschen
-- Lovelace-Karte für die visuelle Anzeige
+- Zukunftsreservierung: hoeher priorisierte Geraete blockieren ihr geplantes PV-/Batteriefenster fuer nachfolgende Geraete
+- Unterstuetzung fuer PV-Prognosen in W, Solcast-Restenergie in kWh und Solcast `detailedForecast`
+- Beruecksichtigung aktueller PV-Produktion in W
+- Beruecksichtigung der Haus-Basislast in W
+- Optionale Batterieplanung mit SoC, verfuegbarer Energie, Gesamtkapazitaet und Mindest-SoC
+- Akku-Nacht-Waechter mit optionalem Nachtverbrauchs-Sensor und Diagnosegrund statt pauschaler Warnung
+- Erkennung bereits laufender Geraete ueber aktuelle Leistungsaufnahme
+- Geraete nachtraeglich bearbeiten oder einzeln loeschen
+- Lovelace-Karte fuer die visuelle Anzeige
 
-## Benötigte Sensoren
+## Benoetigte Sensoren
 
 Pflicht:
 
-- Geräte-Leistungssensor in W, z. B. Waschmaschine, Trockner, Pool oder Klimaanlage
+- Geraete-Leistungssensor in W, z. B. Waschmaschine, Trockner, Pool oder Klimaanlage
 - PV-Prognosesensor
 - Haus-Basislast in W
 
@@ -34,80 +35,84 @@ Optional:
 
 - Aktuelle PV-Leistung in W
 - Batterie-SoC in %
-- Batterie-GesamtkapazitÃ¤t in kWh
+- Batterie-Gesamtkapazitaet in kWh
+- Verfuegbare oder aktuell gespeicherte Batterie-Energie in kWh
 - Batterie-Ladeleistung in W
 - Batterie-Entladeleistung in W
-- Netzbezug als kumulierender kWh-ZÃ¤hler
-- Netzeinspeisung als kumulierender kWh-ZÃ¤hler
-- Verfügbare Batterie-Energie in kWh
-- Mindest-SoC für Batterie-Nutzung
+- Netzbezug als kumulierender kWh-Zaehler
+- Netzeinspeisung als kumulierender kWh-Zaehler
+- Mindest-SoC fuer Batterie-Nutzung
 - Hausverbrauch Nacht in kWh
-- Früheste und späteste Startzeit für neue Gerätestarts
+- Frueheste und spaeteste Startzeit fuer neue Geraetestarts
 
-Solcast-Sensoren mit `unit_of_measurement: kWh` werden unterstützt. Die Integration nutzt bevorzugt das Attribut `estimate` als verbleibende PV-Energie und rechnet daraus eine durchschnittlich verfügbare Leistung für den Planungshorizont.
-
-Wenn ein Solcast-Sensor ein `detailedForecast`-Attribut liefert, nutzt die Integration diese zeitaufgeloesten 30-Minuten-Werte direkt fuer die Startzeitberechnung.
+Solcast-Sensoren mit `unit_of_measurement: kWh` werden unterstuetzt. Wenn das Attribut `detailedForecast` vorhanden ist, nutzt die Integration die zeitaufgeloesten 30-Minuten-Werte direkt fuer die Startzeitberechnung. Ohne `detailedForecast` wird weiterhin das Attribut `estimate` als verbleibende PV-Energie genutzt und daraus eine durchschnittlich verfuegbare Leistung fuer den Planungshorizont berechnet.
 
 ## Einrichtung
 
-1. Repository über HACS als Custom Repository hinzufügen.
+1. Repository ueber HACS als Custom Repository hinzufuegen.
 2. Integration installieren.
 3. Home Assistant neu starten.
-4. Unter Einstellungen > Geräte & Dienste > Integration hinzufügen den PV Smart Scheduler einrichten.
-5. Erstes Gerät und globale Sensoren auswählen.
-6. Weitere Geräte über denselben Config Flow hinzufügen.
+4. Unter Einstellungen > Geraete & Dienste > Integration hinzufuegen den PV Smart Scheduler einrichten.
+5. Erstes Geraet und globale Sensoren auswaehlen.
+6. Weitere Geraete ueber denselben Config Flow hinzufuegen.
 
-## Nachträglich Anpassen
+## Nachtraeglich Anpassen
 
-Über das Zahnrad der Integration stehen folgende Optionen zur Verfügung:
+Ueber das Zahnrad der Integration stehen folgende Optionen zur Verfuegung:
 
-- Globale Sensoren ändern
-- Gerät bearbeiten, inklusive Entität, Priorität und Zielabdeckung
-- Einzelnes Gerät löschen
+- Globale Sensoren aendern
+- Geraet bearbeiten, inklusive Entitaet, Prioritaet und Zielabdeckung
+- Einzelnes Geraet loeschen
 
-Die globalen Sensoren gelten für alle konfigurierten Geräte. Beim Löschen wird nur das ausgewählte Gerät entfernt.
+Die globalen Sensoren gelten fuer alle konfigurierten Geraete. Beim Loeschen wird nur das ausgewaehlte Geraet entfernt.
 
-## Zentrale Entität
+## Zentrale Entitaet
 
-Die Entität `sensor.pv_smart_scheduler_zentrale` liefert unter anderem:
+Die Entitaet `sensor.pv_smart_scheduler_zentrale` liefert unter anderem:
 
-- `devices`: Liste aller geplanten Geräte
-- `device_count`: Anzahl Geräte in der Ausgabe
-- `configured_device_count`: Anzahl gespeicherter Geräte in der Konfiguration
+- `devices`: Liste aller geplanten Geraete
+- `device_count`: Anzahl Geraete in der Ausgabe
+- `configured_device_count`: Anzahl gespeicherter Geraete in der Konfiguration
 - `unique_device_count`: Anzahl eindeutiger Leistungssensoren in der Berechnung
 - `pv_current_power`: aktuelle PV-Leistung
 - `battery_soc`: Batterie-Ladestand
 - `battery_available_kwh`: nutzbare Batterie-Energie
-- `battery_capacity_kwh`: konfigurierte oder erkannte Batterie-GesamtkapazitÃ¤t
+- `battery_capacity_kwh`: konfigurierte oder erkannte Batterie-Gesamtkapazitaet
+- `battery_min_soc`: konfigurierte Mindestreserve
 - `battery_charge_power`: aktuelle Batterie-Ladeleistung
 - `battery_discharge_power`: aktuelle Batterie-Entladeleistung
-- `grid_import_energy_kwh`: aktueller Stand des NetzbezugszÃ¤hlers
-- `grid_export_energy_kwh`: aktueller Stand des EinspeisezÃ¤hlers
-- `battery_min_soc`: konfigurierte Mindestreserve
-- `night_consumption_sensor`: konfigurierter Sensor für den letzten Nachtverbrauch
-- `schedule_start_time`: früheste Startzeit für geplante Gerätestarts
-- `schedule_end_time`: späteste Startzeit für geplante Gerätestarts
-- `battery_night_warning`: `true`, wenn eine Warnung für die Nacht angezeigt werden soll
+- `grid_import_energy_kwh`: aktueller Stand des Netzbezugszaehlers
+- `grid_export_energy_kwh`: aktueller Stand des Einspeisezaehlers
+- `night_consumption_sensor`: konfigurierter Sensor fuer den letzten Nachtverbrauch
+- `schedule_start_time`: frueheste Startzeit fuer geplante Geraetestarts
+- `schedule_end_time`: spaeteste Startzeit fuer geplante Geraetestarts
+- `battery_night_warning`: `true`, wenn eine Warnung fuer die Nacht angezeigt werden soll
 - `battery_night_reason`: Diagnose, warum gewarnt oder nicht gewarnt wird
-- `night_usage_estimate_wh`: ermittelter oder geschätzter Energiebedarf für die Nacht
-- `night_usage_source`: Quelle der Nachtverbrauchsschätzung
+- `night_usage_estimate_wh`: ermittelter oder geschaetzter Energiebedarf fuer die Nacht
+- `night_usage_source`: Quelle der Nachtverbrauchsschaetzung
 - `night_usage_window_start`: Start des ausgewerteten Nachtfensters bei kumulierenden Energiesensoren
 - `night_usage_window_end`: Ende des ausgewerteten Nachtfensters bei kumulierenden Energiesensoren
 - `forecast_source_unit`: Einheit des Forecast-Sensors
 - `forecast_remaining_kwh`: verbleibende PV-Energie bei kWh-Forecast
-- `forecast_average_power`: daraus berechnete Durchschnittsleistung
+- `forecast_average_power`: berechnete Durchschnittsleistung des verwendeten Forecasts
 
-Pro Gerät werden unter anderem geliefert:
+Pro Geraet werden unter anderem geliefert:
 
-- `recommendation`: `ja`, `warten` oder `läuft`
-- `is_running`: Gerät läuft aktuell
-- `current_power`: aktuelle Leistung des Geräts
-- `best_start_time`: konkreter ISO-Zeitstempel für den geplanten Start
+- `recommendation`: `ja`, `warten` oder `laeuft`
+- `is_running`: Geraet laeuft aktuell
+- `current_power`: aktuelle Leistung des Geraets
+- `best_start_time`: konkreter ISO-Zeitstempel fuer den geplanten Start
 - `best_start_mins`: Minuten bis zum Start
 - `duration_mins`: erwartete Programmdauer basierend auf dem gelernten Profil
+- `target_coverage`: konfigurierte Zielabdeckung
 - `pv_coverage`: berechnete PV-/Batterie-Deckung
 - `estimated_kwh`: erwarteter Energiebedarf
 - `battery_used_kwh`: eingeplante Batterie-Energie
+- `weather_confidence`: Diagnosewert zur Forecast-Stabilitaet
+
+## Technische Dokumentation
+
+Die technische Architektur und die Scheduling-Logik sind in [docs/TECHNICAL.md](docs/TECHNICAL.md) dokumentiert.
 
 ## Lovelace-Karte
 
@@ -124,8 +129,8 @@ type: custom:pv-smart-scheduler-card
 entity: sensor.pv_smart_scheduler_zentrale
 ```
 
-Nach Updates der Karte kann ein Browser-/App-Cache-Refresh nötig sein. Bei manueller Ressource hilft eine Versionsquery, z. B.:
+Nach Updates der Karte kann ein Browser-/App-Cache-Refresh noetig sein. Bei manueller Ressource hilft eine Versionsquery, z. B.:
 
 ```text
-/pv_smart_scheduler/pv-smart-scheduler-card.js?v=0.1.10
+/pv_smart_scheduler/pv-smart-scheduler-card.js?v=0.2.0
 ```

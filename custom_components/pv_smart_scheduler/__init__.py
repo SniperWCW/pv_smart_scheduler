@@ -362,6 +362,16 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                     schedule_end_offset
                 )
 
+                if is_running:
+                    best_start = 0
+                    max_coverage, battery_used_wh = self._calculate_window_coverage(
+                        profile,
+                        virtual_pv_forecast,
+                        clean_base_load,
+                        remaining_battery_wh,
+                        best_start
+                    )
+
                 # Berechne konkrete Uhrzeit
                 start_time = dt_util.now() + timedelta(minutes=best_start)
 
@@ -384,11 +394,14 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                     "target_coverage": config.get("target_coverage", 90)
                 }
 
-                # Reserviere PV-Leistung und Batterie für dieses Gerät, wenn es läuft oder jetzt starten soll
-                if is_running or (recommendation == "ja" and best_start == 0):
-                    profile_len = len(profile)
-                    for i in range(min(profile_len, len(virtual_pv_forecast))):
-                        virtual_pv_forecast[i] = max(0.0, virtual_pv_forecast[i] - profile[i])
+                # Reserve higher-priority devices at their actual planned offset.
+                reservation_start = 0 if is_running else best_start
+                if profile and reservation_start is not None:
+                    self._reserve_forecast_window(
+                        virtual_pv_forecast,
+                        profile,
+                        reservation_start
+                    )
                     remaining_battery_wh = max(0.0, remaining_battery_wh - battery_used_wh)
 
             except Exception as err:
@@ -827,6 +840,65 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             forecast[minute] = max(forecast[minute], current_pv_estimate)
 
         return forecast
+
+    def _reserve_forecast_window(self, forecast, profile, start_offset):
+        """Reserves PV capacity for a higher-priority device at its planned offset."""
+        try:
+            start = max(0, int(start_offset))
+        except (TypeError, ValueError):
+            start = 0
+
+        if start >= len(forecast):
+            return
+
+        for minute, device_power in enumerate(profile):
+            forecast_index = start + minute
+            if forecast_index >= len(forecast):
+                break
+            forecast[forecast_index] = max(0.0, forecast[forecast_index] - device_power)
+
+    def _calculate_window_coverage(
+        self,
+        profile,
+        forecast,
+        base_load,
+        battery_available_wh,
+        start_min
+    ):
+        """Calculates PV and battery coverage for one concrete start offset."""
+        if not profile or not forecast:
+            return 0.0, 0.0
+
+        try:
+            start = max(0, int(start_min))
+        except (TypeError, ValueError):
+            start = 0
+
+        if start >= len(forecast):
+            return 0.0, 0.0
+
+        total_device_energy = 0.0
+        covered_by_pv_energy = 0.0
+        missing_energy = 0.0
+
+        for minute, device_power in enumerate(profile):
+            forecast_index = start + minute
+            if forecast_index >= len(forecast):
+                break
+
+            forecast_power = forecast[forecast_index]
+            available_excess = max(0.0, forecast_power - base_load)
+            total_device_energy += device_power
+            covered_now = min(device_power, available_excess)
+            covered_by_pv_energy += covered_now
+            missing_energy += max(0.0, device_power - covered_now)
+
+        battery_available_watt_minutes = battery_available_wh * 60
+        covered_by_battery_energy = min(missing_energy, battery_available_watt_minutes)
+        covered_energy = covered_by_pv_energy + covered_by_battery_energy
+        coverage_percent = (covered_energy / total_device_energy) * 100 if total_device_energy > 0 else 0.0
+
+        return coverage_percent, covered_by_battery_energy / 60
 
     def _calculate_best_window(
         self,
