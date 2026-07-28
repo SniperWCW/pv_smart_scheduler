@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.2.4
+
+- Fixed an in-memory profile cache fallback that could keep using an invalid learned device profile even after `pv_smart_scheduler_profiles_v3.json` was deleted.
+
 ## v0.2.3
 
 - Added a visible card version marker in the Lovelace header to detect stale frontend caches.

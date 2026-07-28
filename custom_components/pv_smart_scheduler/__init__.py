@@ -591,13 +591,17 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
     async def _get_adaptive_profile(self, entity_id):
         """Erstellt ein zeitlich korrektes 1-Minuten-Leistungsprofil aus der Historie."""
         now = dt_util.utcnow()
+        cached_profile = self.learned_profiles.get(entity_id)
+        normalized_cached_profile = self._normalize_profile(cached_profile) if cached_profile is not None else None
+        if cached_profile is not None and normalized_cached_profile is None:
+            self.learned_profiles.pop(entity_id, None)
+            await self.hass.async_add_executor_job(self.save_learned_profiles)
+            cached_profile = None
         
         # Throttling: Historie nur einmal pro Stunde abfragen oder wenn Profil fehlt
         last_check = self._profile_query_timestamps.get(entity_id, dt_util.utc_from_timestamp(0))
-        if entity_id in self.learned_profiles and (now - last_check).total_seconds() < 3600:
-            cached_profile = self._normalize_profile(self.learned_profiles[entity_id])
-            if cached_profile is not None:
-                return cached_profile
+        if normalized_cached_profile is not None and (now - last_check).total_seconds() < 3600:
+            return normalized_cached_profile
 
         self._profile_query_timestamps[entity_id] = now
 
@@ -624,7 +628,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                     break
 
         if last_active_idx == -1:
-            return self.learned_profiles.get(entity_id, default_profile)
+            return normalized_cached_profile or default_profile
 
         # 2. Finde den Start dieses aktiven Zyklus (gehe zurück bis eine Lücke > 20 Min auftritt)
         start_active_idx = last_active_idx
@@ -672,7 +676,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             await self.hass.async_add_executor_job(self.save_learned_profiles)
             return normalized_profile
 
-        return self.learned_profiles.get(entity_id, default_profile)
+        return normalized_cached_profile or default_profile
 
     def _get_pv_forecast(self, forecast_sensor_id):
         state = self.hass.states.get(forecast_sensor_id)
