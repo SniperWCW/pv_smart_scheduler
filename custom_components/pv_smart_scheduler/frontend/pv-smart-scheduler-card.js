@@ -1,3 +1,5 @@
+const CARD_VERSION = '0.2.3';
+
 class PVSmartSchedulerCard extends HTMLElement {
   set hass(hass) {
     const entityId = (this.config && this.config.entity) || 'sensor.pv_smart_scheduler_zentrale';
@@ -15,7 +17,10 @@ class PVSmartSchedulerCard extends HTMLElement {
         <ha-card>
           <div id="card-header-info" style="padding: 12px 16px 0 16px; font-size: 12px; display: flex; justify-content: space-between; align-items: center;">
             <div id="battery-status"></div>
-            <div id="forecast-status"></div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <div id="forecast-status"></div>
+              <div id="card-version" style="color: var(--secondary-text-color); opacity: 0.8;"></div>
+            </div>
           </div>
           <style>
             .timeline-wrapper {
@@ -75,6 +80,7 @@ class PVSmartSchedulerCard extends HTMLElement {
       this.timelineArea = this.querySelector('#timeline-area');
       this.headerBattery = this.querySelector('#battery-status');
       this.headerForecast = this.querySelector('#forecast-status');
+      this.headerVersion = this.querySelector('#card-version');
     }
 
     let html = '';
@@ -102,6 +108,7 @@ class PVSmartSchedulerCard extends HTMLElement {
     }
     const avgPower = stateObj.attributes.forecast_average_power;
     this.headerForecast.innerHTML = avgPower ? `<span style="color: var(--secondary-text-color);">Ø Prognose: ${avgPower} W</span>` : '';
+    this.headerVersion.textContent = `Card ${CARD_VERSION}`;
 
     if (devices.length === 0) {
       html = `<tr><td colspan="4" style="padding: 16px; text-align: center; color: var(--secondary-text-color);">Keine Geräte konfiguriert</td></tr>`;

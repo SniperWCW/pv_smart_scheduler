@@ -21,6 +21,8 @@ FORECAST_HORIZON_MINUTES = 720
 DEFAULT_SCHEDULE_START_TIME = "05:00"
 DEFAULT_SCHEDULE_END_TIME = "23:00"
 DEFAULT_NIGHT_HOURS = 12
+MAX_PROFILE_POWER_W = 25000
+MAX_PROFILE_ENERGY_WH = 50000
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Wird beim allgemeinen Starten von Home Assistant aufgerufen."""
@@ -208,25 +210,43 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
 
         sanitized = {}
         for entity_id, profile in raw_profiles.items():
-            if not isinstance(entity_id, str) or not isinstance(profile, list):
+            normalized_profile = self._normalize_profile(profile)
+            if not isinstance(entity_id, str) or normalized_profile is None:
                 continue
-
-            cleaned_profile = []
-            for value in profile:
-                try:
-                    numeric_value = float(value)
-                except (TypeError, ValueError):
-                    continue
-
-                if not math.isfinite(numeric_value):
-                    continue
-
-                cleaned_profile.append(max(0.0, round(numeric_value, 3)))
-
-            if len(cleaned_profile) >= 10:
-                sanitized[entity_id] = cleaned_profile
+            sanitized[entity_id] = normalized_profile
 
         return sanitized
+
+    def _normalize_profile(self, profile):
+        if not isinstance(profile, list):
+            return None
+
+        cleaned_profile = []
+        for value in profile:
+            try:
+                numeric_value = float(value)
+            except (TypeError, ValueError):
+                continue
+
+            if not math.isfinite(numeric_value):
+                continue
+
+            if numeric_value < 0:
+                numeric_value = 0.0
+
+            if numeric_value > MAX_PROFILE_POWER_W:
+                continue
+
+            cleaned_profile.append(round(numeric_value, 3))
+
+        if len(cleaned_profile) < 10:
+            return None
+
+        total_energy_wh = sum(cleaned_profile) / 60.0
+        if total_energy_wh <= 50 or total_energy_wh > MAX_PROFILE_ENERGY_WH:
+            return None
+
+        return cleaned_profile
 
     def _clean_numeric_string(self, val_str):
         """Säubert einen String und wandelt ihn in eine float-kompatible Zahl um."""
@@ -575,7 +595,9 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         # Throttling: Historie nur einmal pro Stunde abfragen oder wenn Profil fehlt
         last_check = self._profile_query_timestamps.get(entity_id, dt_util.utc_from_timestamp(0))
         if entity_id in self.learned_profiles and (now - last_check).total_seconds() < 3600:
-            return self.learned_profiles[entity_id]
+            cached_profile = self._normalize_profile(self.learned_profiles[entity_id])
+            if cached_profile is not None:
+                return cached_profile
 
         self._profile_query_timestamps[entity_id] = now
 
@@ -644,10 +666,11 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         # Qualitäts-Check: Nur speichern, wenn das Profil lang genug ist 
         # UND eine Mindestmenge an Energie (Wh) enthält (verhindert Standby-Lernen)
         total_energy_wh = (sum(resampled_profile) / 60)
-        if len(resampled_profile) > 20 and total_energy_wh > 50:
-            self.learned_profiles[entity_id] = resampled_profile
+        normalized_profile = self._normalize_profile(resampled_profile)
+        if normalized_profile is not None:
+            self.learned_profiles[entity_id] = normalized_profile
             await self.hass.async_add_executor_job(self.save_learned_profiles)
-            return resampled_profile
+            return normalized_profile
 
         return self.learned_profiles.get(entity_id, default_profile)
 

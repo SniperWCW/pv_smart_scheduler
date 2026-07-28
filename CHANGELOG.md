@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.3
+
+- Added a visible card version marker in the Lovelace header to detect stale frontend caches.
+- Rejected implausible learned device profiles so corrupted history values no longer produce absurd `estimated_kwh` outputs.
+
 ## v0.2.2
 
 - Improved PV window evaluation by simulating battery availability over time with charge/discharge limits.
