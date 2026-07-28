@@ -11,6 +11,7 @@ Die Integration erzeugt eine zentrale Entitaet `sensor.pv_smart_scheduler_zentra
 - Visuelle Gantt-Timeline mit konfigurierbarem Startfenster, standardmaessig 05:00 bis 23:00 Uhr
 - Peak-Finder: sucht den energetisch besten Zeitpunkt, auch wenn keine 100% PV-Deckung erreichbar ist
 - Adaptive Verbrauchsprofile aus der Recorder-Historie der letzten 14 Tage
+- Robuste Profilspeicherung in `pv_smart_scheduler_profiles_v3.json` mit Validierung und Bereinigung entfernter Geraete
 - Standby-Filter und robustes Parsing von Leistungswerten aus Status oder Attributen
 - 12-Stunden-Planungshorizont mit kaskadierender Priorisierung
 - Zukunftsreservierung: hoeher priorisierte Geraete blockieren ihr geplantes PV-/Batteriefenster fuer nachfolgende Geraete
@@ -137,5 +138,5 @@ entity: sensor.pv_smart_scheduler_zentrale
 Nach Updates der Karte kann ein Browser-/App-Cache-Refresh noetig sein. Bei manueller Ressource hilft eine Versionsquery, z. B.:
 
 ```text
-/pv_smart_scheduler/pv-smart-scheduler-card.js?v=0.2.0
+/pv_smart_scheduler/pv-smart-scheduler-card.js?v=0.2.2
 ```

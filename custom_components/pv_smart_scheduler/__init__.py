@@ -1,6 +1,7 @@
 import logging
 import json
 import os
+import math
 from datetime import timedelta
 
 from homeassistant.core import HomeAssistant
@@ -164,13 +165,23 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         self.configured_device_count = configured_device_count
         self.unique_device_count = len(new_config)
         await self.async_load_learned_profiles()
+        valid_entities = set(new_config.keys())
+        pruned_profiles = {
+            entity_id: profile
+            for entity_id, profile in self.learned_profiles.items()
+            if entity_id in valid_entities
+        }
+        if pruned_profiles != self.learned_profiles:
+            self.learned_profiles = pruned_profiles
+            await self.hass.async_add_executor_job(self.save_learned_profiles)
 
     async def async_load_learned_profiles(self):
         def load():
             if os.path.exists(self.profile_path):
                 try:
-                    with open(self.profile_path, "r") as f:
-                        return json.load(f)
+                    with open(self.profile_path, "r", encoding="utf-8") as f:
+                        raw_profiles = json.load(f)
+                    return self._sanitize_profile_store(raw_profiles)
                 except Exception as err:
                     _LOGGER.error(f"Fehler beim Laden der Profile: {err}")
             return {}
@@ -178,10 +189,44 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
 
     def save_learned_profiles(self):
         try:
-            with open(self.profile_path, "w") as f:
-                json.dump(self.learned_profiles, f, indent=4)
+            directory = os.path.dirname(self.profile_path)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+
+            sanitized_profiles = self._sanitize_profile_store(self.learned_profiles)
+            tmp_path = f"{self.profile_path}.tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(sanitized_profiles, f, indent=4)
+            os.replace(tmp_path, self.profile_path)
+            self.learned_profiles = sanitized_profiles
         except Exception as err:
             _LOGGER.error(f"Fehler beim Speichern der Profile: {err}")
+
+    def _sanitize_profile_store(self, raw_profiles):
+        if not isinstance(raw_profiles, dict):
+            return {}
+
+        sanitized = {}
+        for entity_id, profile in raw_profiles.items():
+            if not isinstance(entity_id, str) or not isinstance(profile, list):
+                continue
+
+            cleaned_profile = []
+            for value in profile:
+                try:
+                    numeric_value = float(value)
+                except (TypeError, ValueError):
+                    continue
+
+                if not math.isfinite(numeric_value):
+                    continue
+
+                cleaned_profile.append(max(0.0, round(numeric_value, 3)))
+
+            if len(cleaned_profile) >= 10:
+                sanitized[entity_id] = cleaned_profile
+
+        return sanitized
 
     def _clean_numeric_string(self, val_str):
         """Säubert einen String und wandelt ihn in eine float-kompatible Zahl um."""
@@ -314,6 +359,13 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             battery_capacity_kwh,
             battery_min_soc
         )
+        battery_charge_power = self._get_float_state(first_config.get("battery_charge_power_sensor"))
+        battery_discharge_power = self._get_float_state(first_config.get("battery_discharge_power_sensor"))
+        max_battery_budget_wh = self._calculate_battery_budget_ceiling_wh(
+            battery_capacity_kwh,
+            battery_min_soc,
+            battery_available_wh
+        )
 
         virtual_pv_forecast = self._build_virtual_pv_forecast(
             raw_forecast,
@@ -333,8 +385,8 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             "battery_available_kwh": round(battery_available_wh / 1000, 2),
             "battery_capacity_kwh": round(battery_capacity_kwh, 2) if battery_capacity_kwh is not None else None,
             "battery_min_soc": battery_min_soc,
-            "battery_charge_power": self._get_float_state(first_config.get("battery_charge_power_sensor")),
-            "battery_discharge_power": self._get_float_state(first_config.get("battery_discharge_power_sensor")),
+            "battery_charge_power": battery_charge_power,
+            "battery_discharge_power": battery_discharge_power,
             "grid_import_energy_kwh": self._energy_wh_to_kwh(self._get_energy_state(first_config.get("grid_import_energy_sensor"))),
             "grid_export_energy_kwh": self._energy_wh_to_kwh(self._get_energy_state(first_config.get("grid_export_energy_sensor"))),
             "night_consumption_sensor": night_consumption_sensor,
@@ -359,6 +411,14 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         
         # Die "echte" Basislast ist der Hausverbrauch minus die gesteuerten Geräte.
         clean_base_load = max(0.0, total_base_load - managed_running_power)
+        battery_trace = self._build_battery_trace(
+            virtual_pv_forecast,
+            clean_base_load,
+            remaining_battery_wh,
+            max_battery_budget_wh,
+            battery_charge_power,
+            battery_discharge_power
+        )
 
         # Nachtverbrauchsschätzung (Grob: 12 Stunden Nacht * Basislast)
         night_usage_window_start = None
@@ -409,6 +469,10 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                     virtual_pv_forecast,
                     clean_base_load,
                     remaining_battery_wh,
+                    battery_trace,
+                    battery_charge_power,
+                    battery_discharge_power,
+                    max_battery_budget_wh,
                     config.get("target_coverage", 90),
                     schedule_start_offset,
                     schedule_end_offset
@@ -421,6 +485,10 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                         virtual_pv_forecast,
                         clean_base_load,
                         remaining_battery_wh,
+                        battery_trace,
+                        battery_charge_power,
+                        battery_discharge_power,
+                        max_battery_budget_wh,
                         best_start
                     )
 
@@ -458,9 +526,18 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                     self._reserve_forecast_window(
                         virtual_pv_forecast,
                         profile,
+                        clean_base_load,
                         reservation_start
                     )
                     remaining_battery_wh = max(0.0, remaining_battery_wh - battery_used_wh)
+                    battery_trace = self._build_battery_trace(
+                        virtual_pv_forecast,
+                        clean_base_load,
+                        remaining_battery_wh,
+                        max_battery_budget_wh,
+                        battery_charge_power,
+                        battery_discharge_power
+                    )
 
             except Exception as err:
                 _LOGGER.error(f"Fehler bei Berechnung für {entity_id}: {err}")
@@ -899,8 +976,47 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
 
         return forecast
 
-    def _reserve_forecast_window(self, forecast, profile, start_offset):
-        """Reserves PV capacity for a higher-priority device at its planned offset."""
+    def _calculate_battery_budget_ceiling_wh(self, battery_capacity_kwh, min_soc, fallback_wh):
+        if battery_capacity_kwh and battery_capacity_kwh > 0:
+            usable_fraction = max(0.0, (100.0 - float(min_soc)) / 100.0)
+            return battery_capacity_kwh * 1000.0 * usable_fraction
+        return max(0.0, float(fallback_wh or 0.0))
+
+    def _build_battery_trace(
+        self,
+        forecast,
+        base_load,
+        initial_available_wh,
+        max_available_wh,
+        charge_power_w,
+        discharge_power_w
+    ):
+        """Simulates baseline battery state over the forecast horizon."""
+        if not forecast:
+            return [max(0.0, float(initial_available_wh or 0.0))]
+
+        battery_wh = max(0.0, min(float(initial_available_wh or 0.0), float(max_available_wh or 0.0)))
+        max_budget_wh = max(0.0, float(max_available_wh or 0.0))
+        charge_limit = None if charge_power_w is None or charge_power_w <= 0 else float(charge_power_w)
+        discharge_limit = None if discharge_power_w is None or discharge_power_w <= 0 else float(discharge_power_w)
+        trace = [battery_wh]
+
+        for forecast_power in forecast:
+            net_power = float(forecast_power) - float(base_load)
+            if net_power >= 0:
+                charge_w = net_power if charge_limit is None else min(net_power, charge_limit)
+                battery_wh = min(max_budget_wh, battery_wh + (charge_w / 60.0))
+            else:
+                discharge_need_w = abs(net_power)
+                discharge_w = discharge_need_w if discharge_limit is None else min(discharge_need_w, discharge_limit)
+                discharge_w = min(discharge_w, battery_wh * 60.0)
+                battery_wh = max(0.0, battery_wh - (discharge_w / 60.0))
+            trace.append(battery_wh)
+
+        return trace
+
+    def _reserve_forecast_window(self, forecast, profile, base_load, start_offset):
+        """Reserves only the PV share actually consumed by a higher-priority device."""
         try:
             start = max(0, int(start_offset))
         except (TypeError, ValueError):
@@ -913,7 +1029,9 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             forecast_index = start + minute
             if forecast_index >= len(forecast):
                 break
-            forecast[forecast_index] = max(0.0, forecast[forecast_index] - device_power)
+            available_excess = max(0.0, forecast[forecast_index] - base_load)
+            pv_reserved = min(float(device_power), available_excess)
+            forecast[forecast_index] = max(0.0, forecast[forecast_index] - pv_reserved)
 
     def _calculate_window_coverage(
         self,
@@ -921,6 +1039,10 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         forecast,
         base_load,
         battery_available_wh,
+        battery_trace,
+        battery_charge_power_w,
+        battery_discharge_power_w,
+        max_battery_budget_wh,
         start_min
     ):
         """Calculates PV and battery coverage for one concrete start offset."""
@@ -935,28 +1057,45 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         if start >= len(forecast):
             return 0.0, 0.0
 
+        if battery_trace and start < len(battery_trace):
+            battery_wh = max(0.0, battery_trace[start])
+        else:
+            battery_wh = max(0.0, float(battery_available_wh or 0.0))
+
         total_device_energy = 0.0
         covered_by_pv_energy = 0.0
-        missing_energy = 0.0
+        covered_by_battery_energy = 0.0
+        charge_limit = None if battery_charge_power_w is None or battery_charge_power_w <= 0 else float(battery_charge_power_w)
+        discharge_limit = None if battery_discharge_power_w is None or battery_discharge_power_w <= 0 else float(battery_discharge_power_w)
+        max_budget_wh = max(0.0, float(max_battery_budget_wh or battery_wh))
 
         for minute, device_power in enumerate(profile):
             forecast_index = start + minute
             if forecast_index >= len(forecast):
                 break
 
-            forecast_power = forecast[forecast_index]
+            device_power = float(device_power)
+            forecast_power = float(forecast[forecast_index])
             available_excess = max(0.0, forecast_power - base_load)
             total_device_energy += device_power
-            covered_now = min(device_power, available_excess)
-            covered_by_pv_energy += covered_now
-            missing_energy += max(0.0, device_power - covered_now)
+            pv_covered_now = min(device_power, available_excess)
+            covered_by_pv_energy += pv_covered_now
 
-        battery_available_watt_minutes = battery_available_wh * 60
-        covered_by_battery_energy = min(missing_energy, battery_available_watt_minutes)
+            remaining_device_power = max(0.0, device_power - pv_covered_now)
+            discharge_w = remaining_device_power if discharge_limit is None else min(remaining_device_power, discharge_limit)
+            discharge_w = min(discharge_w, battery_wh * 60.0)
+            covered_by_battery_energy += discharge_w
+            battery_wh = max(0.0, battery_wh - (discharge_w / 60.0))
+
+            surplus_after_device = max(0.0, forecast_power - base_load - device_power)
+            charge_w = surplus_after_device if charge_limit is None else min(surplus_after_device, charge_limit)
+            if charge_w > 0:
+                battery_wh = min(max_budget_wh, battery_wh + (charge_w / 60.0))
+
         covered_energy = covered_by_pv_energy + covered_by_battery_energy
         coverage_percent = (covered_energy / total_device_energy) * 100 if total_device_energy > 0 else 0.0
 
-        return coverage_percent, covered_by_battery_energy / 60
+        return coverage_percent, covered_by_battery_energy / 60.0
 
     def _calculate_best_window(
         self,
@@ -964,6 +1103,10 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         forecast,
         base_load,
         battery_available_wh=0.0,
+        battery_trace=None,
+        battery_charge_power_w=None,
+        battery_discharge_power_w=None,
+        max_battery_budget_wh=0.0,
         target_coverage=90.0,
         earliest_start_offset=0,
         latest_start_offset=FORECAST_HORIZON_MINUTES
@@ -975,7 +1118,6 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             return 0, 0.0, 0.0
         
         windows = []
-        battery_available_watt_minutes = battery_available_wh * 60
         latest_start = min(forecast_len - profile_len, max(0, int(latest_start_offset)))
         earliest_start = max(0, min(int(earliest_start_offset), latest_start))
         first_start = ((earliest_start + 14) // 15) * 15
@@ -987,28 +1129,23 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         candidate_starts.extend(range(first_start, latest_start + 1, 15))
 
         for start_min in candidate_starts:
-            total_device_energy = 0
-            covered_by_pv_energy = 0
-            missing_energy = 0
-            for t in range(profile_len):
-                device_power = profile[t]
-                forecast_power = forecast[start_min + t]
-                available_excess = max(0, forecast_power - base_load)
-                total_device_energy += device_power
-                covered_now = min(device_power, available_excess)
-                covered_by_pv_energy += covered_now
-                missing_energy += max(0, device_power - covered_now)
-
-            covered_by_battery_energy = min(missing_energy, battery_available_watt_minutes)
-            covered_energy = covered_by_pv_energy + covered_by_battery_energy
-            
-            coverage_percent = (covered_energy / total_device_energy) * 100 if total_device_energy > 0 else 0
+            coverage_percent, battery_used_wh = self._calculate_window_coverage(
+                profile,
+                forecast,
+                base_load,
+                battery_available_wh,
+                battery_trace,
+                battery_charge_power_w,
+                battery_discharge_power_w,
+                max_battery_budget_wh,
+                start_min
+            )
             absolute_pv_sum = sum(forecast[start_min:start_min + profile_len])
             
             windows.append({
                 "start": start_min,
                 "coverage": coverage_percent,
-                "battery_wh": covered_by_battery_energy / 60,
+                "battery_wh": battery_used_wh,
                 "absolute_pv": absolute_pv_sum
             })
 

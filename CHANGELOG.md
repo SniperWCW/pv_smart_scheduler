@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.2
+
+- Improved PV window evaluation by simulating battery availability over time with charge/discharge limits.
+- Fixed future reservation so higher-priority devices reserve only the PV share they actually consume.
+- Hardened learned profile persistence in `pv_smart_scheduler_profiles_v3.json` with validation, pruning and atomic writes.
+- Fixed Lovelace card start column for running devices so it shows `Läuft` instead of a watt value.
+
 ## v0.2.1
 
 - Added optional per-device state sensor for more reliable running-state detection.

@@ -130,7 +130,7 @@ class PVSmartSchedulerCard extends HTMLElement {
         const statusColor = isRunning ? 'var(--info-color, #2196f3)' : (isReady ? 'var(--success-color, #4caf50)' : 'var(--warning-color, #ff9800)');
 
         if (isRunning) {
-          bestStartDisplay = currentPower > 5 ? `${this.formatNumber(currentPower, 0)} W` : 'Läuft';
+          bestStartDisplay = 'Läuft';
         } else if (isReady && startMins === 0) {
           bestStartDisplay = 'Sofort';
         }
