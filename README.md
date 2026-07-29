@@ -22,7 +22,7 @@ Die Integration erzeugt eine zentrale Entitaet `sensor.pv_smart_scheduler_zentra
 - Akku-Nacht-Waechter mit optionalem Nachtverbrauchs-Sensor und Diagnosegrund statt pauschaler Warnung
 - Erkennung bereits laufender Geraete ueber aktuelle Leistungsaufnahme
 - Geraete nachtraeglich bearbeiten oder einzeln loeschen
-- Lovelace-Karte fuer die visuelle Anzeige
+- Lovelace-Karte fuer die visuelle Anzeige mit automatischer Resource-Registrierung im Storage-Modus
 
 ## Benoetigte Sensoren
 
@@ -128,6 +128,8 @@ Die Karte liegt unter:
 /pv_smart_scheduler/pv-smart-scheduler-card.js
 ```
 
+Im Standardfall muss die Ressource nicht mehr manuell unter Dashboard-Ressourcen eingetragen werden. Die Integration registriert sie in Home Assistant automatisch, wenn Lovelace im Storage-Modus laeuft.
+
 Beispiel:
 
 ```yaml
@@ -135,8 +137,10 @@ type: custom:pv-smart-scheduler-card
 entity: sensor.pv_smart_scheduler_zentrale
 ```
 
-Nach Updates der Karte kann ein Browser-/App-Cache-Refresh noetig sein. Bei manueller Ressource hilft eine Versionsquery, z. B.:
+Nach Updates der Karte kann ein Browser-/App-Cache-Refresh weiterhin sinnvoll sein, die Resource-URL wird aber automatisch versioniert und von der Integration selbst gepflegt.
 
-```text
-/pv_smart_scheduler/pv-smart-scheduler-card.js?v=0.2.2
-```
+Wichtig:
+
+- Automatische Registrierung funktioniert nur im Lovelace-Storage-Modus.
+- Wenn du Lovelace-Ressourcen bewusst ueber YAML verwaltest, bleibt die manuelle Resource noetig.
+- Falls frueher bereits eine manuelle Resource ohne Versionsquery eingetragen war, aktualisiert die Integration diese auf die aktuelle integrierte URL.

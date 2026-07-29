@@ -12,6 +12,7 @@ Die Integration schaltet keine Geraete selbst. Sie stellt Empfehlungen und Diagn
 
 - `custom_components/pv_smart_scheduler/__init__.py`
   - richtet den statischen Frontend-Pfad ein
+  - registriert die eingebettete Lovelace-Ressource automatisch im Storage-Modus
   - erstellt den globalen `PVSmartSchedulerCoordinator`
   - sammelt Konfiguration, Sensorwerte, Profile und Scheduling-Ergebnisse
 - `custom_components/pv_smart_scheduler/config_flow.py`
@@ -20,6 +21,20 @@ Die Integration schaltet keine Geraete selbst. Sie stellt Empfehlungen und Diagn
   - stellt die zentrale Sensor-Entitaet mit Geraeteliste und Kontextattributen bereit
 - `custom_components/pv_smart_scheduler/frontend/pv-smart-scheduler-card.js`
   - zeigt Empfehlungen und Timeline in Lovelace an
+
+## Lovelace-Resource
+
+Die Karte wird als statische Datei unter `/pv_smart_scheduler/pv-smart-scheduler-card.js` ausgeliefert.
+
+Beim Start und beim Einrichten eines Config Entries versucht die Integration zusaetzlich, die Lovelace-Ressource automatisch zu registrieren:
+
+- nur im Lovelace-Storage-Modus
+- mit `type: module`
+- mit versionsierter URL, aktuell `?v=0.2.6`
+
+Wenn bereits eine Resource mit derselben Basis-URL existiert, wird sie auf die aktuelle Version aktualisiert statt doppelt angelegt.
+
+Im YAML-Ressourcenmodus greift diese Automatik bewusst nicht, weil Home Assistant YAML-Ressourcen getrennt von den per UI verwalteten Storage-Ressourcen behandelt.
 
 ## Update-Zyklus
 

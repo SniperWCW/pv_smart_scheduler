@@ -3,9 +3,12 @@ import json
 import os
 import math
 from datetime import timedelta
+from urllib.parse import urlsplit, urlunsplit
 
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.components.lovelace.const import LOVELACE_DATA, MODE_STORAGE
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.components.recorder import history
 from homeassistant.util import dt as dt_util
@@ -24,6 +27,10 @@ DEFAULT_NIGHT_HOURS = 12
 MAX_PROFILE_POWER_W = 25000
 MAX_PROFILE_ENERGY_WH = 50000
 ACTIVE_STATE_SENSOR_GRACE_MINUTES = 90
+CARD_MODULE_FILENAME = "pv-smart-scheduler-card.js"
+INTEGRATION_VERSION = "0.2.6"
+CARD_RESOURCE_BASE_URL = f"/{DOMAIN}/{CARD_MODULE_FILENAME}"
+CARD_RESOURCE_URL = f"{CARD_RESOURCE_BASE_URL}?v={INTEGRATION_VERSION}"
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Wird beim allgemeinen Starten von Home Assistant aufgerufen."""
@@ -41,7 +48,70 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         )
     ])
 
+    async def _register_card_resource(_event):
+        await async_ensure_card_resource(hass)
+
+    hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _register_card_resource)
+
     return True
+
+
+async def async_ensure_card_resource(hass: HomeAssistant) -> None:
+    """Ensure the embedded Lovelace card resource exists in storage mode."""
+    lovelace_data = hass.data.get(LOVELACE_DATA)
+    if lovelace_data is None:
+        _LOGGER.debug("Lovelace data not available yet, skipping auto-registration of card resource")
+        return
+
+    if getattr(lovelace_data, "resource_mode", None) != MODE_STORAGE:
+        _LOGGER.debug(
+            "Skipping automatic card resource registration because Lovelace resource mode is not storage"
+        )
+        return
+
+    resources = getattr(lovelace_data, "resources", None)
+    if resources is None:
+        _LOGGER.debug("Lovelace resources collection unavailable, skipping card resource registration")
+        return
+
+    await resources.async_get_info()
+    items = list(resources.async_items() or [])
+
+    for item in items:
+        if item.get("url") == CARD_RESOURCE_URL and item.get("type") == "module":
+            return
+
+    matching_item = next(
+        (
+            item for item in items
+            if _resource_base_url(item.get("url")) == CARD_RESOURCE_BASE_URL
+        ),
+        None,
+    )
+
+    try:
+        if matching_item and matching_item.get("id"):
+            await resources.async_update_item(
+                matching_item["id"],
+                {"url": CARD_RESOURCE_URL, "res_type": "module"},
+            )
+            _LOGGER.info("Updated Lovelace resource for %s to %s", DOMAIN, CARD_RESOURCE_URL)
+            return
+
+        await resources.async_create_item(
+            {"url": CARD_RESOURCE_URL, "res_type": "module"}
+        )
+        _LOGGER.info("Registered Lovelace resource for %s at %s", DOMAIN, CARD_RESOURCE_URL)
+    except Exception as err:  # pragma: no cover - defensive integration guard
+        _LOGGER.warning("Failed to auto-register Lovelace card resource: %s", err)
+
+
+def _resource_base_url(url: str | None) -> str | None:
+    if not url:
+        return None
+
+    parts = urlsplit(url)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
@@ -58,6 +128,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator = hass.data[DOMAIN]["global_coordinator"]
         await coordinator.async_refresh_devices_config()
         await coordinator.async_refresh()
+
+    await async_ensure_card_resource(hass)
 
     await hass.config_entries.async_forward_entry_setups(entry, ["sensor"])
     return True

@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.6
+
+- Added automatic Lovelace resource registration for the embedded card in Home Assistant storage mode.
+- Resource URLs are now versioned automatically so card updates are picked up without manually editing the dashboard resource entry.
+
 ## v0.2.5
 
 - Fixed stale optional device state sensors from keeping individual devices on outdated scheduler timing for too long.
