@@ -23,6 +23,7 @@ DEFAULT_SCHEDULE_END_TIME = "23:00"
 DEFAULT_NIGHT_HOURS = 12
 MAX_PROFILE_POWER_W = 25000
 MAX_PROFILE_ENERGY_WH = 50000
+ACTIVE_STATE_SENSOR_GRACE_MINUTES = 90
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Wird beim allgemeinen Starten von Home Assistant aufgerufen."""
@@ -311,8 +312,19 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         except (TypeError, ValueError, IndexError):
             return None
 
+    def _is_state_recent(self, state, max_age_minutes):
+        if state is None:
+            return False
+
+        try:
+            age_seconds = (dt_util.utcnow() - state.last_updated).total_seconds()
+        except (AttributeError, TypeError):
+            return False
+
+        return age_seconds <= (max_age_minutes * 60)
+
     def _is_device_running(self, current_power, state_sensor_state=None):
-        """Returns device activity using an optional state sensor, otherwise power."""
+        """Returns device activity using power and an optional state sensor."""
         if state_sensor_state is not None:
             raw_state = str(state_sensor_state.state or "").lower()
             inactive_states = {
@@ -343,7 +355,10 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             if raw_state in inactive_states:
                 return False
             if raw_state in active_states:
-                return True
+                if current_power > DEVICE_ACTIVE_POWER_THRESHOLD:
+                    return True
+                if self._is_state_recent(state_sensor_state, ACTIVE_STATE_SENSOR_GRACE_MINUTES):
+                    return True
 
         return current_power > DEVICE_ACTIVE_POWER_THRESHOLD
 
@@ -526,9 +541,11 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                     "power_state": state.state if state else None,
                     "power_unit": state.attributes.get("unit_of_measurement") if state else None,
                     "power_last_updated": state.last_updated.isoformat() if state else None,
+                    "power_is_stale": not self._is_state_recent(state, ACTIVE_STATE_SENSOR_GRACE_MINUTES) if state else True,
                     "device_state_sensor": device_state_sensor,
                     "device_state": state_sensor_state.state if state_sensor_state else None,
                     "device_state_last_updated": state_sensor_state.last_updated.isoformat() if state_sensor_state else None,
+                    "device_state_is_stale": not self._is_state_recent(state_sensor_state, ACTIVE_STATE_SENSOR_GRACE_MINUTES) if state_sensor_state else None,
                     "best_start_mins": best_start,
                     "coverage_percent": round(max_coverage, 1),
                     "total_kwh": round(total_kwh, 2),

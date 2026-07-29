@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.5
+
+- Fixed stale optional device state sensors from keeping individual devices on outdated scheduler timing for too long.
+- Added diagnostic freshness attributes for power and optional state sensors.
+
 ## v0.2.4
 
 - Fixed an in-memory profile cache fallback that could keep using an invalid learned device profile even after `pv_smart_scheduler_profiles_v3.json` was deleted.
