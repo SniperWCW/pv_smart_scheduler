@@ -95,7 +95,10 @@ class PVSmartSchedulerMasterSensor(
                 "weather_confidence": round(
                     data.get("weather_stability", 0),
                     0
-                )
+                ),
+                "plan_reason": data.get("plan_reason"),
+                "minimum_run_remaining_mins": data.get("minimum_run_remaining_mins", 0),
+                "minimum_pause_remaining_mins": data.get("minimum_pause_remaining_mins", 0)
             })
 
         context = self.coordinator.last_context or {}
@@ -127,6 +130,7 @@ class PVSmartSchedulerMasterSensor(
             "forecast_source_unit": context.get("forecast_source_unit"),
             "forecast_remaining_kwh": context.get("forecast_remaining_kwh"),
             "forecast_average_power": context.get("forecast_average_power"),
+            "forecast_status": context.get("forecast_status"),
             "battery_night_warning": context.get("battery_night_warning"),
             "battery_night_reason": context.get("battery_night_reason"),
             "night_usage_estimate_wh": context.get("night_usage_estimate_wh"),

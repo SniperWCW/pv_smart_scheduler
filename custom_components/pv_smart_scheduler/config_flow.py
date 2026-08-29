@@ -37,7 +37,10 @@ class PVSmartSchedulerConfigFlow(
                     "device_power_sensor": user_input["device_power_sensor"],
                     "device_state_sensor": user_input.get("device_state_sensor"),
                     "target_coverage": user_input["target_coverage"],
-                    "priority": user_input["priority"]
+                    "priority": user_input["priority"],
+                    "min_run_minutes": user_input.get("min_run_minutes", 0),
+                    "min_pause_minutes": user_input.get("min_pause_minutes", 0),
+                    "offpeak_start_time": user_input.get("offpeak_start_time")
                 })
 
                 new_data = {
@@ -178,7 +181,10 @@ class PVSmartSchedulerConfigFlow(
                             user_input["target_coverage"],
 
                         "priority":
-                            user_input["priority"]
+                            user_input["priority"],
+                        "min_run_minutes": user_input.get("min_run_minutes", 0),
+                        "min_pause_minutes": user_input.get("min_pause_minutes", 0),
+                        "offpeak_start_time": user_input.get("offpeak_start_time")
                     }
                 ]
             }
@@ -453,7 +459,10 @@ class PVSmartSchedulerConfigFlow(
             ): vol.All(
                 vol.Coerce(int),
                 vol.Range(min=1, max=10)
-            )
+            ),
+            vol.Optional("min_run_minutes", default=0): vol.All(vol.Coerce(int), vol.Range(min=0, max=720)),
+            vol.Optional("min_pause_minutes", default=0): vol.All(vol.Coerce(int), vol.Range(min=0, max=720)),
+            vol.Optional("offpeak_start_time", default=vol.UNDEFINED): selector.TimeSelector()
         })
 
 
@@ -511,7 +520,10 @@ class PVSmartSchedulerOptionsFlowHandler(
                         "device_power_sensor": user_input["device_power_sensor"],
                         "device_state_sensor": user_input.get("device_state_sensor"),
                         "target_coverage": user_input["target_coverage"],
-                        "priority": user_input["priority"]
+                        "priority": user_input["priority"],
+                        "min_run_minutes": user_input.get("min_run_minutes", 0),
+                        "min_pause_minutes": user_input.get("min_pause_minutes", 0),
+                        "offpeak_start_time": user_input.get("offpeak_start_time")
                     })
                 else:
                     new_devices.append(device)
@@ -546,7 +558,10 @@ class PVSmartSchedulerOptionsFlowHandler(
                 default=current_device.get("priority", 1)
             ): vol.All(
                 vol.Coerce(int), vol.Range(min=1, max=10)
-            )
+            ),
+            vol.Optional("min_run_minutes", default=current_device.get("min_run_minutes", 0)): vol.All(vol.Coerce(int), vol.Range(min=0, max=720)),
+            vol.Optional("min_pause_minutes", default=current_device.get("min_pause_minutes", 0)): vol.All(vol.Coerce(int), vol.Range(min=0, max=720)),
+            vol.Optional("offpeak_start_time", default=current_device.get("offpeak_start_time", vol.UNDEFINED)): selector.TimeSelector()
         })
 
         return self.async_show_form(

@@ -2,6 +2,7 @@ import logging
 import json
 import os
 import math
+import statistics
 from datetime import timedelta
 from urllib.parse import urlsplit, urlunsplit
 
@@ -18,6 +19,7 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 PROFILE_LOOKBACK_DAYS = 14
+PROFILE_SAMPLE_LIMIT = 5
 DEFAULT_BATTERY_MIN_SOC = 25
 DEVICE_ACTIVE_POWER_THRESHOLD = 15
 FORECAST_HORIZON_MINUTES = 720
@@ -28,7 +30,7 @@ MAX_PROFILE_POWER_W = 25000
 MAX_PROFILE_ENERGY_WH = 50000
 ACTIVE_STATE_SENSOR_GRACE_MINUTES = 90
 CARD_MODULE_FILENAME = "pv-smart-scheduler-card.js"
-INTEGRATION_VERSION = "0.3.0-beta.3"
+INTEGRATION_VERSION = "0.3.0-beta.4"
 CARD_RESOURCE_BASE_URL = f"/{DOMAIN}/{CARD_MODULE_FILENAME}"
 CARD_RESOURCE_URL = f"{CARD_RESOURCE_BASE_URL}?v={INTEGRATION_VERSION}"
 
@@ -169,6 +171,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         self.learned_profiles = {}
         self.last_context = {}
         self._profile_query_timestamps = {}
+        self._device_activity = {}
         self.profile_path = hass.config.path("pv_smart_scheduler_profiles_v3.json")
 
     async def async_refresh_devices_config(self):
@@ -193,6 +196,15 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
 
                         "priority":
                             device.get("priority", 1),
+
+                        "min_run_minutes":
+                            device.get("min_run_minutes", 0),
+
+                        "min_pause_minutes":
+                            device.get("min_pause_minutes", 0),
+
+                        "offpeak_start_time":
+                            device.get("offpeak_start_time"),
 
                         "pv_forecast_sensor":
                             value.get("pv_forecast_sensor"),
@@ -570,6 +582,15 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                     current_device_power,
                     state_sensor_state
                 )
+                activity = self._update_device_activity(entity_id, is_running)
+                cooldown_remaining = self._pause_remaining_minutes(
+                    is_running,
+                    activity,
+                    state,
+                    state_sensor_state,
+                    config.get("min_pause_minutes", 0)
+                )
+                effective_start_offset = max(schedule_start_offset, cooldown_remaining)
 
                 best_start, max_coverage, battery_used_wh = self._calculate_best_window(
                     profile,
@@ -581,9 +602,24 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                     battery_discharge_power,
                     max_battery_budget_wh,
                     config.get("target_coverage", 90),
-                    schedule_start_offset,
+                    effective_start_offset,
                     schedule_end_offset
                 )
+                plan_reason = "pv_window"
+                if not profile:
+                    plan_reason = "profile_missing"
+                elif cooldown_remaining:
+                    plan_reason = "minimum_pause"
+                elif max_coverage < config.get("target_coverage", 90):
+                    offpeak_offset = self._next_time_offset(config.get("offpeak_start_time"))
+                    if offpeak_offset is not None and offpeak_offset <= schedule_end_offset:
+                        best_start = offpeak_offset
+                        max_coverage, battery_used_wh = self._calculate_window_coverage(
+                            profile, virtual_pv_forecast, clean_base_load,
+                            remaining_battery_wh, battery_trace, battery_charge_power,
+                            battery_discharge_power, max_battery_budget_wh, best_start
+                        )
+                        plan_reason = "offpeak_fallback"
 
                 if is_running:
                     best_start = 0
@@ -598,6 +634,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                         max_battery_budget_wh,
                         best_start
                     )
+                    plan_reason = "running"
 
                 # Berechne konkrete Uhrzeit
                 start_time = dt_util.now() + timedelta(minutes=best_start)
@@ -623,6 +660,12 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                     "total_kwh": round(total_kwh, 2),
                     "battery_used_kwh": round(battery_used_wh / 1000, 2),
                     "duration_mins": duration_mins,
+                    "plan_reason": plan_reason,
+                    "minimum_run_remaining_mins": self._run_remaining_minutes(
+                        is_running, activity, state, state_sensor_state,
+                        config.get("min_run_minutes", 0)
+                    ),
+                    "minimum_pause_remaining_mins": cooldown_remaining,
                     "best_start_time": start_time.isoformat(),
                     "weather_stability": round(weather_stability * 100, 0),
                     "priority": config["priority"],
@@ -677,6 +720,48 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         except ValueError:
             return 0.85
 
+    def _update_device_activity(self, entity_id, is_running):
+        now = dt_util.utcnow()
+        activity = self._device_activity.setdefault(entity_id, {"is_running": None})
+        if activity["is_running"] is not None and activity["is_running"] != is_running:
+            activity["last_started" if is_running else "last_stopped"] = now
+        activity["is_running"] = is_running
+        return activity
+
+    def _activity_changed_at(self, state, state_sensor_state):
+        source = state_sensor_state or state
+        return getattr(source, "last_changed", None) if source else None
+
+    def _remaining_minutes(self, changed_at, minimum):
+        if not changed_at or not minimum:
+            return 0
+        elapsed = (dt_util.utcnow() - changed_at).total_seconds() / 60
+        return max(0, int(math.ceil(float(minimum) - elapsed)))
+
+    def _run_remaining_minutes(self, is_running, activity, state, state_sensor_state, minimum):
+        if not is_running:
+            return 0
+        return self._remaining_minutes(
+            activity.get("last_started") or self._activity_changed_at(state, state_sensor_state),
+            minimum
+        )
+
+    def _pause_remaining_minutes(self, is_running, activity, state, state_sensor_state, minimum):
+        if is_running:
+            return 0
+        return self._remaining_minutes(
+            activity.get("last_stopped") or self._activity_changed_at(state, state_sensor_state),
+            minimum
+        )
+
+    def _next_time_offset(self, value):
+        if not value:
+            return None
+        target_minutes = self._parse_time_minutes(value, "00:00")
+        now = dt_util.now()
+        now_minutes = (now.hour * 60) + now.minute
+        return target_minutes - now_minutes if target_minutes >= now_minutes else (1440 - now_minutes) + target_minutes
+
     async def _get_adaptive_profile(self, entity_id):
         """Erstellt ein zeitlich korrektes 1-Minuten-Leistungsprofil aus der Historie."""
         now = dt_util.utcnow()
@@ -699,10 +784,19 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             history.get_significant_states, self.hass, now - timedelta(days=PROFILE_LOOKBACK_DAYS), now, [entity_id]
         )
 
-        default_profile = [300] * 120
+        # Ohne gelerntes Profil wird bewusst nicht mehr mit einer erfundenen
+        # Verbrauchskurve geplant. Das verhindert falsche Sofort-Empfehlungen.
+        default_profile = []
         states = history_dict.get(entity_id, [])
         if not states:
-            return default_profile
+            return normalized_cached_profile or default_profile
+
+        recent_profiles = self._extract_recent_completed_profiles(states)
+        if recent_profiles:
+            representative_profile = self._select_representative_profile(recent_profiles)
+            self.learned_profiles[entity_id] = representative_profile
+            await self.hass.async_add_executor_job(self.save_learned_profiles)
+            return representative_profile
 
         # 1. Finde den letzten BEENDETEN Zyklus (Übergang von Aktiv zu Inaktiv)
         # Wir gehen von hinten nach vorne durch die Historie
@@ -767,16 +861,68 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
 
         return normalized_cached_profile or default_profile
 
+    def _extract_recent_completed_profiles(self, states):
+        profiles = []
+        for end_idx in range(len(states) - 1, 0, -1):
+            active_power = self._parse_state_value(states[end_idx - 1])
+            next_power = self._parse_state_value(states[end_idx])
+            if active_power is None or next_power is None or active_power <= DEVICE_ACTIVE_POWER_THRESHOLD or next_power > DEVICE_ACTIVE_POWER_THRESHOLD:
+                continue
+
+            start_idx = end_idx - 1
+            while start_idx > 0:
+                previous_power = self._parse_state_value(states[start_idx - 1])
+                gap = (states[start_idx].last_changed - states[start_idx - 1].last_changed).total_seconds()
+                if previous_power is None or previous_power <= DEVICE_ACTIVE_POWER_THRESHOLD or gap > 1200:
+                    break
+                start_idx -= 1
+
+            start = states[start_idx].last_changed
+            end = states[end_idx].last_changed
+            duration = min(360, int((end - start).total_seconds() / 60))
+            if duration < 10:
+                continue
+
+            profile = []
+            pointer = start_idx
+            for minute in range(duration):
+                check_time = start + timedelta(minutes=minute)
+                while pointer + 1 < end_idx and states[pointer + 1].last_changed <= check_time:
+                    pointer += 1
+                power = self._parse_state_value(states[pointer]) or 0.0
+                profile.append(power if power >= DEVICE_ACTIVE_POWER_THRESHOLD else 0.0)
+
+            normalized = self._normalize_profile(profile)
+            if normalized:
+                profiles.append(normalized)
+            if len(profiles) >= PROFILE_SAMPLE_LIMIT:
+                break
+        return profiles
+
+    def _select_representative_profile(self, profiles):
+        median_duration = statistics.median(len(profile) for profile in profiles)
+        energies = [sum(profile) / 60 for profile in profiles]
+        median_energy = statistics.median(energies)
+        return min(
+            profiles,
+            key=lambda profile: (
+                abs(len(profile) - median_duration) / max(1, median_duration)
+                + abs((sum(profile) / 60) - median_energy) / max(1, median_energy)
+            )
+        )
+
     def _get_pv_forecast(self, forecast_sensor_id):
         state = self.hass.states.get(forecast_sensor_id)
         context = {
             "forecast_source_unit": None,
             "forecast_remaining_kwh": None,
-            "forecast_average_power": None
+            "forecast_average_power": None,
+            "forecast_status": "available"
         }
 
         if not state or state.state in ("unknown", "unavailable"):
-            return [1200.0] * FORECAST_HORIZON_MINUTES, context
+            context["forecast_status"] = "unavailable"
+            return [0.0] * FORECAST_HORIZON_MINUTES, context
 
         unit = state.attributes.get("unit_of_measurement")
         context["forecast_source_unit"] = unit
@@ -795,7 +941,8 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         try:
             forecast_value = float(state.attributes.get("estimate", state.state))
         except (TypeError, ValueError):
-            forecast_value = 1200.0
+            context["forecast_status"] = "invalid"
+            return [0.0] * FORECAST_HORIZON_MINUTES, context
 
         if unit and unit.lower() in ("kwh", "kw h"):
             remaining_minutes = self._remaining_daylight_minutes()

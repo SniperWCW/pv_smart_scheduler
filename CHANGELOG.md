@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.0-beta.4
+
+- Made unavailable or invalid PV forecasts fail closed instead of assuming fictitious solar production.
+- Learn a representative device profile from up to five recent completed runs instead of relying on one run.
+- Added per-device minimum run and pause settings plus an optional off-peak fallback time.
+
 ## v0.3.0-beta.3
 
 - Moved the current-time label above the timeline axis so it no longer covers a time tick.

@@ -22,7 +22,10 @@
           "schedule_start_time": "Fr\u00fcheste Startzeit",
           "schedule_end_time": "Sp\u00e4teste Startzeit",
           "target_coverage": "Gewünschte PV-Abdeckung",
-          "priority": "Priorität"
+          "priority": "Priorität",
+          "min_run_minutes": "Mindestlaufzeit (Minuten)",
+          "min_pause_minutes": "Mindestpause (Minuten)",
+          "offpeak_start_time": "Optionaler Tarifstart"
         },
         "data_description": {
           "device_power_sensor": "Leistungssensor des Geräts in Watt, z. B. Waschmaschine, Trockner oder Pool.",
@@ -42,7 +45,10 @@
           "schedule_start_time": "Vor dieser Uhrzeit werden keine neuen Gerätestarts geplant.",
           "schedule_end_time": "Nach dieser Uhrzeit werden keine neuen Gerätestarts geplant.",
           "target_coverage": "Mindestabdeckung in Prozent, die durch PV und nutzbare Batterie erreicht werden soll.",
-          "priority": "Niedrige Zahlen werden zuerst eingeplant. Priorität 1 reserviert PV-Leistung vor Priorität 2."
+          "priority": "Niedrige Zahlen werden zuerst eingeplant. Priorität 1 reserviert PV-Leistung vor Priorität 2.",
+          "min_run_minutes": "Zeigt eine verbleibende Mindestlaufzeit für bereits laufende Geräte an.",
+          "min_pause_minutes": "Nach dem Ausschalten wird das Gerät für diese Zeit nicht erneut als Sofortstart empfohlen.",
+          "offpeak_start_time": "Optional: Wenn das PV-Ziel nicht erreicht wird, wird dieser Zeitpunkt als Tarif-Fallback vorgeschlagen. Leer lassen, wenn nicht benötigt."
         }
       }
     },
@@ -75,7 +81,10 @@
           "device_power_sensor": "Geräte-Leistungssensor",
           "device_state_sensor": "Geräte-Statussensor",
           "target_coverage": "Gewünschte PV-Abdeckung",
-          "priority": "Priorität"
+          "priority": "Priorität",
+          "min_run_minutes": "Mindestlaufzeit (Minuten)",
+          "min_pause_minutes": "Mindestpause (Minuten)",
+          "offpeak_start_time": "Optionaler Tarifstart"
         }
       },
       "global_sensors": {

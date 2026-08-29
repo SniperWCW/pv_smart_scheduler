@@ -1,4 +1,4 @@
-const CARD_VERSION = '0.3.0-beta.3';
+const CARD_VERSION = '0.3.0-beta.4';
 
 class PVSmartSchedulerCard extends HTMLElement {
   set hass(hass) {
@@ -254,6 +254,9 @@ class PVSmartSchedulerCard extends HTMLElement {
 
   deviceStatusLabel(device, isRunning) {
     if (isRunning) return 'Programm läuft';
+    if (device.plan_reason === 'profile_missing') return 'Noch kein gelerntes Verbrauchsprofil';
+    if (device.plan_reason === 'minimum_pause') return `Mindestpause: noch ${device.minimum_pause_remaining_mins || 0} Min.`;
+    if (device.plan_reason === 'offpeak_fallback') return 'PV-Ziel nicht erreicht · optionaler Tarifstart';
     if (device.recommendation === 'ja') return 'PV-Fenster verfügbar';
     if (device.recommendation === 'warten') return 'Besseres PV-Fenster abwarten';
     return device.device_state ? `Status: ${device.device_state}` : 'Wird geplant';

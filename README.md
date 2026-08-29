@@ -14,6 +14,9 @@ Die Integration erzeugt eine zentrale Entitaet `sensor.pv_smart_scheduler_zentra
 - Gantt-Timeline mit Jetzt-Marker und farblicher PV-Deckungsbewertung
 - Peak-Finder: sucht den energetisch besten Zeitpunkt, auch wenn keine 100% PV-Deckung erreichbar ist
 - Adaptive Verbrauchsprofile aus der Recorder-Historie der letzten 14 Tage
+- Robustes Lernprofil aus bis zu fünf abgeschlossenen Durchläufen statt einem einzelnen Programm
+- Fehlende oder ungültige PV-Prognosen führen zu keiner erfundenen PV-Leistung und werden konservativ behandelt
+- Pro Gerät optional: Mindestlaufzeit, Mindestpause und ein Tarif-Fallback zu einer frei wählbaren Uhrzeit
 - Robuste Profilspeicherung in `pv_smart_scheduler_profiles_v3.json` mit Validierung und Bereinigung entfernter Geraete
 - Standby-Filter und robustes Parsing von Leistungswerten aus Status oder Attributen
 - 12-Stunden-Planungshorizont mit kaskadierender Priorisierung
