@@ -9,6 +9,9 @@ Die Integration erzeugt eine zentrale Entitaet `sensor.pv_smart_scheduler_zentra
 ## Funktionen
 
 - Visuelle Gantt-Timeline mit konfigurierbarem Startfenster, standardmaessig 05:00 bis 23:00 Uhr
+- Kompakte Karten-Zusammenfassung mit sofort sinnvollen Geraeten, PV-Restprognose und Prognosequalitaet
+- Diagnose pro Geraet fuer veraltete Sensordaten, Planungsstatus und eingeplante Batterieenergie
+- Gantt-Timeline mit Jetzt-Marker und farblicher PV-Deckungsbewertung
 - Peak-Finder: sucht den energetisch besten Zeitpunkt, auch wenn keine 100% PV-Deckung erreichbar ist
 - Adaptive Verbrauchsprofile aus der Recorder-Historie der letzten 14 Tage
 - Robuste Profilspeicherung in `pv_smart_scheduler_profiles_v3.json` mit Validierung und Bereinigung entfernter Geraete

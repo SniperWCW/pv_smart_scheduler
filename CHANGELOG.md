@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.0-beta.1
+
+- Added a compact scheduler summary with immediately useful device count, remaining PV forecast, and forecast quality.
+- Added per-device planning and stale-sensor diagnostics, including planned battery use.
+- Improved the Gantt timeline with coverage-based colours and a current-time marker.
+
 ## v0.2.6
 
 - Added automatic Lovelace resource registration for the embedded card in Home Assistant storage mode.

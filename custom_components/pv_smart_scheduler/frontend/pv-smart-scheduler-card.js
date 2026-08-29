@@ -1,4 +1,4 @@
-const CARD_VERSION = '0.2.6';
+const CARD_VERSION = '0.3.0-beta.1';
 
 class PVSmartSchedulerCard extends HTMLElement {
   set hass(hass) {
@@ -23,6 +23,11 @@ class PVSmartSchedulerCard extends HTMLElement {
             </div>
           </div>
           <style>
+            .scheduler-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 12px 16px 0; }
+            .summary-tile { padding: 8px; border-radius: 6px; background: var(--secondary-background-color, rgba(0,0,0,0.05)); text-align: center; }
+            .summary-value { font-size: 16px; font-weight: 600; }
+            .summary-label, .device-details { font-size: 10px; color: var(--secondary-text-color); margin-top: 2px; }
+            .device-warning { color: var(--warning-color, #ff9800); }
             .timeline-wrapper {
               margin-top: 16px;
               padding: 20px 4px 4px 4px;
@@ -59,7 +64,11 @@ class PVSmartSchedulerCard extends HTMLElement {
               justify-content: center;
               white-space: nowrap;
             }
+            .timeline-now { position: absolute; top: -5px; bottom: -5px; width: 2px; background: var(--primary-color, #03a9f4); z-index: 2; pointer-events: none; }
+            .timeline-now-label { position: absolute; top: -18px; transform: translateX(-50%); font-size: 9px; color: var(--primary-color, #03a9f4); font-weight: 600; }
+            @media (max-width: 450px) { .scheduler-summary { grid-template-columns: 1fr; } }
           </style>
+          <div id="scheduler-summary" class="scheduler-summary"></div>
           <div style="padding: 16px;">
             <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 14px;">
               <thead>
@@ -81,6 +90,7 @@ class PVSmartSchedulerCard extends HTMLElement {
       this.headerBattery = this.querySelector('#battery-status');
       this.headerForecast = this.querySelector('#forecast-status');
       this.headerVersion = this.querySelector('#card-version');
+      this.summary = this.querySelector('#scheduler-summary');
     }
 
     let html = '';
@@ -107,8 +117,15 @@ class PVSmartSchedulerCard extends HTMLElement {
       `;
     }
     const avgPower = stateObj.attributes.forecast_average_power;
-    this.headerForecast.innerHTML = avgPower ? `<span style="color: var(--secondary-text-color);">Ø Prognose: ${avgPower} W</span>` : '';
+    this.headerForecast.innerHTML = avgPower ? `<span style="color: var(--secondary-text-color);">Ø Prognose: ${this.formatNumber(avgPower, 0)} W</span>` : '';
     this.headerVersion.textContent = `Card ${CARD_VERSION}`;
+    const readyCount = devices.filter((device) => device.recommendation === 'ja' && !device.is_running).length;
+    const forecastKwh = this.getFirstNumber(stateObj.attributes, ['forecast_remaining_kwh'], null);
+    const confidence = devices.length ? Math.round(devices.reduce((sum, device) => sum + this.getFirstNumber(device, ['weather_confidence'], 0), 0) / devices.length) : null;
+    this.summary.innerHTML = `
+      <div class="summary-tile"><div class="summary-value" style="color: ${readyCount ? 'var(--success-color, #4caf50)' : 'var(--secondary-text-color)'};">${readyCount}</div><div class="summary-label">Jetzt sinnvoll</div></div>
+      <div class="summary-tile"><div class="summary-value">${forecastKwh !== null ? `${this.formatNumber(forecastKwh, 1)} kWh` : '—'}</div><div class="summary-label">PV-Restprognose</div></div>
+      <div class="summary-tile"><div class="summary-value" style="color: ${this.confidenceColor(confidence)};">${confidence !== null ? `${confidence}%` : '—'}</div><div class="summary-label">Prognosequalität</div></div>`;
 
     if (devices.length === 0) {
       html = `<tr><td colspan="4" style="padding: 16px; text-align: center; color: var(--secondary-text-color);">Keine Geräte konfiguriert</td></tr>`;
@@ -132,6 +149,8 @@ class PVSmartSchedulerCard extends HTMLElement {
 
         const pvCoverage = this.getFirstNumber(device, ['pv_coverage'], 0);
         const estimatedKwh = this.getFirstNumber(device, ['estimated_kwh'], 0);
+        const batteryUsedKwh = this.getFirstNumber(device, ['battery_used_kwh'], 0);
+        const hasStaleData = device.power_is_stale || device.device_state_is_stale;
 
         let bestStartDisplay = timeLabel || 'Warten';
         const statusColor = isRunning ? 'var(--info-color, #2196f3)' : (isReady ? 'var(--success-color, #4caf50)' : 'var(--warning-color, #ff9800)');
@@ -154,6 +173,7 @@ class PVSmartSchedulerCard extends HTMLElement {
                 <ha-icon icon="${icon}" style="color: ${statusColor}; --mdc-icon-size: 18px;"></ha-icon>
                 <span>${name}</span>
               </div>
+              <div class="device-details ${hasStaleData ? 'device-warning' : ''}">${hasStaleData ? '⚠ Sensordaten veraltet' : this.escapeHtml(this.deviceStatusLabel(device, isRunning))}</div>
             </td>
             <td style="padding: 10px 4px; text-align: center;">
               <span style="background: ${statusColor}22; color: ${statusColor}; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; display: inline-block; min-width: 80px;">
@@ -162,7 +182,7 @@ class PVSmartSchedulerCard extends HTMLElement {
             </td>
             <td style="padding: 10px 4px; text-align: right; font-weight: bold; color: ${statusColor};">
               ${this.formatNumber(pvCoverage, 1)}%
-              <div style="font-size: 10px; font-weight: normal; color: var(--secondary-text-color);">${this.formatNumber(estimatedKwh, 2)} kWh</div>
+              <div style="font-size: 10px; font-weight: normal; color: var(--secondary-text-color);">${this.formatNumber(estimatedKwh, 2)} kWh${batteryUsedKwh > 0 ? ` · Akku ${this.formatNumber(batteryUsedKwh, 2)} kWh` : ''}</div>
             </td>
           </tr>
         `;
@@ -178,6 +198,7 @@ class PVSmartSchedulerCard extends HTMLElement {
             const visibleDurationMins = Math.max(1, Math.min(durationMins, timelineTotal - startOffset));
             const left = (startOffset / timelineTotal) * 100;
             const width = (visibleDurationMins / timelineTotal) * 100;
+            const coverageColor = this.coverageColor(pvCoverage);
 
             timelineRowsHtml += `
               <div style="display: flex; align-items: center; margin-bottom: 4px;">
@@ -185,7 +206,7 @@ class PVSmartSchedulerCard extends HTMLElement {
                   ${name}
                 </div>
                 <div class="timeline-lane">
-                  <div class="device-bar" style="left: ${left}%; width: ${width}%; background: ${statusColor};" title="${name}: ${timeLabel}">
+                  <div class="device-bar" style="left: ${left}%; width: ${width}%; background: ${coverageColor};" title="${name}: ${timeLabel}, ${this.formatNumber(pvCoverage, 1)}% Deckung">
                     ${width > 15 ? name : ''}
                   </div>
                 </div>
@@ -197,7 +218,8 @@ class PVSmartSchedulerCard extends HTMLElement {
     }
 
     this.content.innerHTML = html;
-    this.timelineArea.innerHTML = timelineRowsHtml ? `<div class="timeline-wrapper">${timelineAxis}${timelineRowsHtml}</div>` : '';
+    const nowMarker = this.buildNowMarker(timelineStartMins, timelineEndMins);
+    this.timelineArea.innerHTML = timelineRowsHtml ? `<div class="timeline-wrapper">${timelineAxis}${nowMarker}${timelineRowsHtml}</div>` : '';
   }
 
   getFirstNumber(source, keys, fallback = 0) {
@@ -215,6 +237,34 @@ class PVSmartSchedulerCard extends HTMLElement {
       minimumFractionDigits: fractionDigits,
       maximumFractionDigits: fractionDigits,
     });
+  }
+
+  coverageColor(coverage) {
+    if (coverage >= 90) return 'var(--success-color, #4caf50)';
+    if (coverage >= 70) return 'var(--info-color, #2196f3)';
+    return 'var(--warning-color, #ff9800)';
+  }
+
+  confidenceColor(confidence) {
+    if (confidence === null) return 'var(--secondary-text-color)';
+    if (confidence >= 75) return 'var(--success-color, #4caf50)';
+    if (confidence >= 45) return 'var(--warning-color, #ff9800)';
+    return 'var(--error-color, #f44336)';
+  }
+
+  deviceStatusLabel(device, isRunning) {
+    if (isRunning) return 'Programm läuft';
+    if (device.recommendation === 'ja') return 'PV-Fenster verfügbar';
+    if (device.recommendation === 'warten') return 'Besseres PV-Fenster abwarten';
+    return device.device_state ? `Status: ${device.device_state}` : 'Wird geplant';
+  }
+
+  buildNowMarker(startMins, endMins) {
+    let nowMins = (new Date().getHours() * 60) + new Date().getMinutes();
+    if (endMins > 1440 && nowMins < startMins) nowMins += 1440;
+    if (nowMins < startMins || nowMins > endMins) return '';
+    const left = ((nowMins - startMins) / (endMins - startMins)) * 100;
+    return `<div class="timeline-now" style="left: ${left}%;"></div><div class="timeline-now-label" style="left: ${left}%;">Jetzt</div>`;
   }
 
   escapeHtml(value) {
