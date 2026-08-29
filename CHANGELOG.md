@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.3.0-beta.2
+
+- Fixed HACS release installation by adding the required `hacs.json` metadata file at the repository root.
+
 ## v0.3.0-beta.1
 
 - Added a compact scheduler summary with immediately useful device count, remaining PV forecast, and forecast quality.
