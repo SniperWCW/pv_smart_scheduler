@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.3.0-beta.3
+
+- Moved the current-time label above the timeline axis so it no longer covers a time tick.
+
 ## v0.3.0-beta.2
 
 - Fixed HACS release installation by adding the required `hacs.json` metadata file at the repository root.

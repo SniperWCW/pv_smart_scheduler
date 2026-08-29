@@ -1,4 +1,4 @@
-const CARD_VERSION = '0.3.0-beta.2';
+const CARD_VERSION = '0.3.0-beta.3';
 
 class PVSmartSchedulerCard extends HTMLElement {
   set hass(hass) {
@@ -65,7 +65,7 @@ class PVSmartSchedulerCard extends HTMLElement {
               white-space: nowrap;
             }
             .timeline-now { position: absolute; top: -5px; bottom: -5px; width: 2px; background: var(--primary-color, #03a9f4); z-index: 2; pointer-events: none; }
-            .timeline-now-label { position: absolute; top: -18px; transform: translateX(-50%); font-size: 9px; color: var(--primary-color, #03a9f4); font-weight: 600; }
+            .timeline-now-label { position: absolute; top: -34px; transform: translateX(-50%); font-size: 9px; color: var(--primary-color, #03a9f4); font-weight: 600; white-space: nowrap; }
             @media (max-width: 450px) { .scheduler-summary { grid-template-columns: 1fr; } }
           </style>
           <div id="scheduler-summary" class="scheduler-summary"></div>
