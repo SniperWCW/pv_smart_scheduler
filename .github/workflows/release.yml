@@ -1,0 +1,89 @@
+name: Release
+
+# Legt automatisch ein GitHub-Release an, sobald auf main eine neue Version in
+# manifest.json steht. Ist der Tag bereits vorhanden, passiert nichts.
+on:
+  push:
+    branches: [main]
+    paths:
+      - custom_components/pv_smart_scheduler/manifest.json
+      - .github/workflows/release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        run: |
+          VERSION=$(python3 -c "import json; print(json.load(open('custom_components/pv_smart_scheduler/manifest.json'))['version'])")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION"
+
+      - name: Check version consistency
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          grep -q "^INTEGRATION_VERSION = \"$VERSION\"$" custom_components/pv_smart_scheduler/__init__.py \
+            || { echo "::error::INTEGRATION_VERSION in __init__.py passt nicht zu $VERSION"; exit 1; }
+          grep -q "^const CARD_VERSION = '$VERSION';$" custom_components/pv_smart_scheduler/frontend/pv-smart-scheduler-card.js \
+            || { echo "::error::CARD_VERSION in der Karte passt nicht zu $VERSION"; exit 1; }
+          grep -q "^## v$VERSION$" CHANGELOG.md \
+            || { echo "::error::CHANGELOG.md hat keinen Abschnitt '## v$VERSION'"; exit 1; }
+
+      - name: Validate sources
+        run: |
+          python3 -m py_compile custom_components/pv_smart_scheduler/*.py
+          for f in hacs.json custom_components/pv_smart_scheduler/manifest.json \
+                   custom_components/pv_smart_scheduler/strings.json \
+                   custom_components/pv_smart_scheduler/translations/*.json; do
+            python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$f"
+          done
+          node --check custom_components/pv_smart_scheduler/frontend/pv-smart-scheduler-card.js
+
+      - name: Check whether the tag already exists
+        id: tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Tag v$VERSION existiert bereits, es wird kein Release angelegt."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Extract release notes from CHANGELOG
+        if: steps.tag.outputs.exists == 'false'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          awk -v h="## v$VERSION" '$0==h{f=1;next} /^## /{f=0} f' CHANGELOG.md | sed '/./,$!d' > release-notes.md
+          if [ ! -s release-notes.md ]; then echo "Release v$VERSION" > release-notes.md; fi
+          cat release-notes.md
+
+      - name: Create release
+        if: steps.tag.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          FLAGS=""
+          # Versionen mit Bindestrich (z. B. 0.5.0-beta.1) sind Vorabversionen.
+          case "$VERSION" in *-*) FLAGS="--prerelease" ;; esac
+          gh release create "v$VERSION" \
+            --target "$GITHUB_SHA" \
+            --title "v$VERSION" \
+            --notes-file release-notes.md \
+            $FLAGS

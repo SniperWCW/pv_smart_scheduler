@@ -264,3 +264,13 @@ Geraeteattribute in `devices`:
 - `estimated_kwh`
 - `battery_used_kwh`
 - `weather_confidence`
+
+## Release-Prozess
+
+Releases werden automatisch durch `.github/workflows/release.yml` angelegt:
+
+1. Version in `custom_components/pv_smart_scheduler/manifest.json`, `INTEGRATION_VERSION` in `__init__.py` und `CARD_VERSION` in der Karte gleichzeitig erhöhen.
+2. In `CHANGELOG.md` einen Abschnitt `## v<Version>` ergänzen. Sein Inhalt wird zu den Release-Notizen.
+3. Auf `main` pushen.
+
+Der Workflow prüft, dass alle Versionen übereinstimmen, validiert Python, JSON und JS und legt das Release `v<Version>` an. Existiert der Tag schon, passiert nichts. Versionen mit Bindestrich (z. B. `0.5.0-beta.1`) werden als Vorabversion markiert.
