@@ -30,7 +30,7 @@ Beim Start und beim Einrichten eines Config Entries versucht die Integration zus
 
 - nur im Lovelace-Storage-Modus
 - mit `type: module`
-- mit versionsierter URL, aktuell `?v=0.2.6`
+- mit versionierter URL (`?v=<Integrationsversion>`, z. B. `?v=0.3.0-beta.5`)
 
 Wenn bereits eine Resource mit derselben Basis-URL existiert, wird sie auf die aktuelle Version aktualisiert statt doppelt angelegt.
 
@@ -99,7 +99,9 @@ Unterstuetzte Quellen:
   - Fallback-Profil sinkt linear leicht ab
 - Sensor in kWh mit `estimate`:
   - wird als Restenergie interpretiert
-  - ohne Detaildaten wird daraus eine Durchschnittsleistung bis 21:00 Uhr berechnet
+  - ohne Detaildaten wird daraus eine konstante Durchschnittsleistung über das Tageslichtfenster berechnet
+  - das Fenster stammt aus `sun.sun` (`next_rising`/`next_setting`), ohne diese Entität gilt 07:00 bis 21:00 Uhr
+  - außerhalb des Fensters ist die Prognose 0 W
 - Solcast `detailedForecast`:
   - wird bevorzugt genutzt
   - jedes 30-Minuten-Intervall mit `pv_estimate` in kWh wird in durchschnittliche W umgerechnet

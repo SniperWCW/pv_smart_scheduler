@@ -8,6 +8,40 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
+DEFAULT_BATTERY_MIN_SOC = 25
+DEFAULT_SCHEDULE_START_TIME = "05:00"
+DEFAULT_SCHEDULE_END_TIME = "23:00"
+
+# Globale Einstellungen, die für alle Geräte gelten.
+GLOBAL_REQUIRED_KEYS = (
+    "pv_forecast_sensor",
+    "home_base_load_sensor",
+    "battery_min_soc",
+    "schedule_start_time",
+    "schedule_end_time",
+)
+GLOBAL_OPTIONAL_KEYS = (
+    "pv_current_power_sensor",
+    "battery_soc_sensor",
+    "battery_energy_sensor",
+    "battery_capacity_sensor",
+    "battery_charge_power_sensor",
+    "battery_discharge_power_sensor",
+    "grid_import_energy_sensor",
+    "grid_export_energy_sensor",
+    "night_consumption_sensor",
+)
+GLOBAL_KEYS = GLOBAL_REQUIRED_KEYS + GLOBAL_OPTIONAL_KEYS
+
+
+def _merged_settings(entry):
+    """Effektive Einstellungen: Optionen haben Vorrang vor den Eintragsdaten."""
+    return {**entry.data, **entry.options}
+
+
+def _without_none(values):
+    return {key: value for key, value in values.items() if value is not None}
+
 
 class PVSmartSchedulerConfigFlow(
     config_entries.ConfigFlow,
@@ -43,69 +77,36 @@ class PVSmartSchedulerConfigFlow(
                     "offpeak_start_time": user_input.get("offpeak_start_time")
                 })
 
-                new_data = {
-                    **entry.data,
-                    "pv_forecast_sensor":
-                        user_input["pv_forecast_sensor"],
-                    "home_base_load_sensor":
-                        user_input["home_base_load_sensor"],
-                    "pv_current_power_sensor":
-                        user_input.get("pv_current_power_sensor")
-                        or entry.options.get("pv_current_power_sensor")
-                        or entry.data.get("pv_current_power_sensor"),
-                    "battery_soc_sensor":
-                        user_input.get("battery_soc_sensor")
-                        or entry.options.get("battery_soc_sensor")
-                        or entry.data.get("battery_soc_sensor"),
-                    "battery_energy_sensor":
-                        user_input.get("battery_energy_sensor")
-                        or entry.options.get("battery_energy_sensor")
-                        or entry.data.get("battery_energy_sensor"),
-                    "battery_capacity_sensor":
-                        user_input.get("battery_capacity_sensor")
-                        or entry.options.get("battery_capacity_sensor")
-                        or entry.data.get("battery_capacity_sensor"),
-                    "battery_charge_power_sensor":
-                        user_input.get("battery_charge_power_sensor")
-                        or entry.options.get("battery_charge_power_sensor")
-                        or entry.data.get("battery_charge_power_sensor"),
-                    "battery_discharge_power_sensor":
-                        user_input.get("battery_discharge_power_sensor")
-                        or entry.options.get("battery_discharge_power_sensor")
-                        or entry.data.get("battery_discharge_power_sensor"),
-                    "grid_import_energy_sensor":
-                        user_input.get("grid_import_energy_sensor")
-                        or entry.options.get("grid_import_energy_sensor")
-                        or entry.data.get("grid_import_energy_sensor"),
-                    "grid_export_energy_sensor":
-                        user_input.get("grid_export_energy_sensor")
-                        or entry.options.get("grid_export_energy_sensor")
-                        or entry.data.get("grid_export_energy_sensor"),
-                    "battery_min_soc":
-                        user_input.get("battery_min_soc")
-                        or entry.options.get("battery_min_soc")
-                        or entry.data.get("battery_min_soc")
-                        or 25,
-                    "night_consumption_sensor":
-                        user_input.get("night_consumption_sensor")
-                        or entry.options.get("night_consumption_sensor")
-                        or entry.data.get("night_consumption_sensor"),
-                    "schedule_start_time":
-                        user_input.get("schedule_start_time")
-                        or entry.options.get("schedule_start_time")
-                        or entry.data.get("schedule_start_time")
-                        or "05:00",
-                    "schedule_end_time":
-                        user_input.get("schedule_end_time")
-                        or entry.options.get("schedule_end_time")
-                        or entry.data.get("schedule_end_time")
-                        or "23:00",
-                    "devices": current_devices
+                merged = _merged_settings(entry)
+                new_data = {**entry.data, "devices": current_devices}
+                # Das Formular ist mit den aktuellen Werten vorbelegt. Ein
+                # fehlendes optionales Feld bedeutet daher: bewusst geleert.
+                for key in GLOBAL_OPTIONAL_KEYS:
+                    new_data[key] = user_input.get(key)
+                new_data["pv_forecast_sensor"] = user_input["pv_forecast_sensor"]
+                new_data["home_base_load_sensor"] = user_input["home_base_load_sensor"]
+                new_data["battery_min_soc"] = user_input.get(
+                    "battery_min_soc",
+                    merged.get("battery_min_soc", DEFAULT_BATTERY_MIN_SOC)
+                )
+                new_data["schedule_start_time"] = user_input.get(
+                    "schedule_start_time",
+                    merged.get("schedule_start_time", DEFAULT_SCHEDULE_START_TIME)
+                )
+                new_data["schedule_end_time"] = user_input.get(
+                    "schedule_end_time",
+                    merged.get("schedule_end_time", DEFAULT_SCHEDULE_END_TIME)
+                )
+                # Alte Options-Werte würden die neuen Eintragsdaten überstimmen.
+                new_options = {
+                    key: value for key, value in entry.options.items()
+                    if key not in GLOBAL_KEYS
                 }
 
                 self.hass.config_entries.async_update_entry(
                     entry,
-                    data=new_data
+                    data=new_data,
+                    options=new_options
                 )
 
                 await self.hass.config_entries.async_reload(
@@ -197,67 +198,12 @@ class PVSmartSchedulerConfigFlow(
         defaults = {}
 
         if existing_entries:
-            entry = existing_entries[0]
-
-            defaults = {
-                "pv_forecast_sensor":
-                    entry.data.get("pv_forecast_sensor"),
-
-                "home_base_load_sensor":
-                    entry.data.get("home_base_load_sensor")
-                    or entry.options.get("home_base_load_sensor"),
-
-                "pv_current_power_sensor":
-                    entry.data.get("pv_current_power_sensor")
-                    or entry.options.get("pv_current_power_sensor"),
-
-                "battery_soc_sensor":
-                    entry.data.get("battery_soc_sensor")
-                    or entry.options.get("battery_soc_sensor"),
-
-                "battery_energy_sensor":
-                    entry.data.get("battery_energy_sensor")
-                    or entry.options.get("battery_energy_sensor"),
-
-                "battery_capacity_sensor":
-                    entry.data.get("battery_capacity_sensor")
-                    or entry.options.get("battery_capacity_sensor"),
-
-                "battery_charge_power_sensor":
-                    entry.data.get("battery_charge_power_sensor")
-                    or entry.options.get("battery_charge_power_sensor"),
-
-                "battery_discharge_power_sensor":
-                    entry.data.get("battery_discharge_power_sensor")
-                    or entry.options.get("battery_discharge_power_sensor"),
-
-                "grid_import_energy_sensor":
-                    entry.data.get("grid_import_energy_sensor")
-                    or entry.options.get("grid_import_energy_sensor"),
-
-                "grid_export_energy_sensor":
-                    entry.data.get("grid_export_energy_sensor")
-                    or entry.options.get("grid_export_energy_sensor"),
-
-                "battery_min_soc":
-                    entry.data.get("battery_min_soc")
-                    or entry.options.get("battery_min_soc")
-                    or 25,
-
-                "night_consumption_sensor":
-                    entry.data.get("night_consumption_sensor")
-                    or entry.options.get("night_consumption_sensor"),
-
-                "schedule_start_time":
-                    entry.data.get("schedule_start_time")
-                    or entry.options.get("schedule_start_time")
-                    or "05:00",
-
-                "schedule_end_time":
-                    entry.data.get("schedule_end_time")
-                    or entry.options.get("schedule_end_time")
-                    or "23:00"
-            }
+            defaults = _without_none(
+                {
+                    key: _merged_settings(existing_entries[0]).get(key)
+                    for key in GLOBAL_KEYS
+                }
+            )
 
         return self.async_show_form(
             step_id="user",
@@ -572,10 +518,18 @@ class PVSmartSchedulerOptionsFlowHandler(
     async def async_step_global_sensors(self, user_input=None):
 
         if user_input is not None:
+            # Geleerte optionale Felder fehlen in user_input. Sie werden als None
+            # gespeichert, damit sie den alten Wert aus entry.data überschreiben.
+            new_options = {**self._config_entry.options}
+            for key in GLOBAL_OPTIONAL_KEYS:
+                new_options[key] = user_input.get(key)
+            for key in GLOBAL_REQUIRED_KEYS:
+                if key in user_input:
+                    new_options[key] = user_input[key]
 
             return self.async_create_entry(
                 title="",
-                data=user_input
+                data=new_options
             )
 
         return self.async_show_form(
@@ -623,10 +577,7 @@ class PVSmartSchedulerOptionsFlowHandler(
         )
 
     def _build_options_schema(self):
-        data = {
-            **self._config_entry.data,
-            **self._config_entry.options
-        }
+        data = _without_none(_merged_settings(self._config_entry))
 
         return vol.Schema({
             vol.Required(

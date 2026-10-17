@@ -26,11 +26,13 @@ FORECAST_HORIZON_MINUTES = 720
 DEFAULT_SCHEDULE_START_TIME = "05:00"
 DEFAULT_SCHEDULE_END_TIME = "23:00"
 DEFAULT_NIGHT_HOURS = 12
+DEFAULT_SUNRISE_MINUTES = 7 * 60
+DEFAULT_SUNSET_MINUTES = 21 * 60
 MAX_PROFILE_POWER_W = 25000
 MAX_PROFILE_ENERGY_WH = 50000
 ACTIVE_STATE_SENSOR_GRACE_MINUTES = 90
 CARD_MODULE_FILENAME = "pv-smart-scheduler-card.js"
-INTEGRATION_VERSION = "0.3.0-beta.4"
+INTEGRATION_VERSION = "0.3.0-beta.5"
 CARD_RESOURCE_BASE_URL = f"/{DOMAIN}/{CARD_MODULE_FILENAME}"
 CARD_RESOURCE_URL = f"{CARD_RESOURCE_BASE_URL}?v={INTEGRATION_VERSION}"
 
@@ -339,11 +341,22 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             return None
         
         # Entferne Leerzeichen und Sonderzeichen wie geschützte Leerzeichen
-        val_str = val_str.strip().replace('\xa0', ' ')
+        val_str = str(val_str).strip().replace('\xa0', ' ')
+        if not val_str:
+            return None
         # Falls Einheiten vorhanden sind ("1942 W"), nimm nur den ersten Teil
         val_str = val_str.split()[0]
 
-        # Fall A: Sowohl Punkt als auch Komma vorhanden (z.B. 1.234,56)
+        # Home-Assistant-States verwenden immer den Punkt als Dezimaltrenner.
+        # Ein einzelner Trenner wird deshalb NIE als Tausendertrenner gedeutet
+        # ("1.942" ist 1,942 und nicht 1942).
+        try:
+            parsed = float(val_str)
+            return parsed if math.isfinite(parsed) else None
+        except ValueError:
+            pass
+
+        # Fallback für Texte aus Attributen mit lokalisierter Schreibweise.
         if "," in val_str and "." in val_str:
             if val_str.rfind(",") > val_str.rfind("."):
                 # Deutsch: 1.234,56 -> 1234.56
@@ -351,20 +364,10 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             else:
                 # US: 1,234.56 -> 1234.56
                 val_str = val_str.replace(",", "")
-        else:
-            # Fall B: Nur ein Trenner vorhanden (Punkt ODER Komma)
-            # Wir prüfen, ob es ein Tausender-Trenner sein könnte (z.B. 1.942 oder 1,942)
-            separator = "." if "." in val_str else ("," if "," in val_str else None)
-            if separator:
-                parts = val_str.split(separator)
-                # Wenn genau 3 Stellen nach dem Trenner folgen -> Tausender-Trenner
-                # Ausnahme: Werte wie "0.123" sind Dezimalzahlen.
-                if len(parts) == 2 and len(parts[1]) == 3 and not val_str.startswith("0" + separator):
-                    val_str = val_str.replace(separator, "")
-                else:
-                    # Ansonsten: Komma zu Punkt wandeln für float()
-                    val_str = val_str.replace(",", ".")
-        
+        elif "," in val_str:
+            # Deutsches Dezimalkomma: 1,5 -> 1.5
+            val_str = val_str.replace(",", ".")
+
         try:
             return float(val_str)
         except ValueError:
@@ -693,14 +696,16 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
 
             except Exception as err:
                 _LOGGER.error(f"Fehler bei Berechnung für {entity_id}: {err}")
-                results[entity_id] = {"recommendation": "warten", "is_running": False, "current_power": 0.0, "best_start_mins": 0, "coverage_percent": 0, "total_kwh": 0, "duration_mins": 0, "weather_stability": 80, "priority": config["priority"], "target_coverage": config.get("target_coverage", 90), "best_start_time": None}
+                results[entity_id] = {"recommendation": "warten", "is_running": False, "current_power": 0.0, "best_start_mins": 0, "coverage_percent": 0, "total_kwh": 0, "duration_mins": 0, "weather_stability": 0, "priority": config["priority"], "target_coverage": config.get("target_coverage", 90), "best_start_time": None}
                 
         return results
 
     def _calculate_weather_stability(self, forecast_sensor_id) -> float:
         state = self.hass.states.get(forecast_sensor_id)
+        # Ein ausgefallener oder ungültiger Forecast hat keine Qualität. Die
+        # Prognosequalität bleibt dann 0, passend zum Fail-closed-Forecast von 0 W.
         if not state or state.state in ("unknown", "unavailable"):
-            return 0.85
+            return 0.0
 
         unit = state.attributes.get("unit_of_measurement")
         if unit and unit.lower() in ("kwh", "kw h"):
@@ -710,15 +715,15 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                 if estimate > 0:
                     return max(0.5, min(1.0, estimate10 / estimate))
             except (TypeError, ValueError):
-                return 0.9
+                return 0.0
 
             return 0.9
 
         try:
             val = float(state.state)
             return 0.75 if val < 500 else (0.88 if val < 1500 else 0.95)
-        except ValueError:
-            return 0.85
+        except (TypeError, ValueError):
+            return 0.0
 
     def _update_device_activity(self, entity_id, is_running):
         now = dt_util.utcnow()
@@ -944,16 +949,34 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             context["forecast_status"] = "invalid"
             return [0.0] * FORECAST_HORIZON_MINUTES, context
 
+        window_start, window_end, window_known = self._get_daylight_window()
+
         if unit and unit.lower() in ("kwh", "kw h"):
-            remaining_minutes = self._remaining_daylight_minutes()
-            average_power = (forecast_value * 1000) / (remaining_minutes / 60)
+            # Die Restenergie wird nur auf das Tageslichtfenster verteilt und
+            # ist danach 0 W. Vorher wurde sie über alle 720 Minuten verteilt,
+            # also auch nachts.
+            window_length = max(60, window_end - window_start)
+            average_power = max(0.0, (forecast_value * 1000.0) / (window_length / 60.0))
             context["forecast_remaining_kwh"] = round(forecast_value, 3)
             context["forecast_average_power"] = round(average_power, 1)
-            return [max(0.0, average_power) for _ in range(FORECAST_HORIZON_MINUTES)], context
+            forecast = [0.0] * FORECAST_HORIZON_MINUTES
+            for minute in range(
+                max(0, window_start),
+                min(FORECAST_HORIZON_MINUTES, window_start + window_length)
+            ):
+                forecast[minute] = average_power
+            return forecast, context
 
         context["forecast_average_power"] = round(forecast_value, 1)
         # Weniger aggressiver Abfall für den Fallback-Forecast
-        return [max(0, forecast_value - (i * 1.5)) for i in range(FORECAST_HORIZON_MINUTES)], context
+        forecast = [max(0.0, forecast_value - (i * 1.5)) for i in range(FORECAST_HORIZON_MINUTES)]
+        if window_known:
+            # Nur mit echten Sonnendaten maskieren, damit eine falsch geschätzte
+            # Standardzeit keine gültige Prognose abschneidet.
+            for minute in range(FORECAST_HORIZON_MINUTES):
+                if not (window_start <= minute < window_end):
+                    forecast[minute] = 0.0
+        return forecast, context
 
     def _forecast_from_detailed_intervals(self, intervals):
         """Builds a 1-minute W forecast from Solcast-style kWh intervals."""
@@ -1000,14 +1023,47 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
 
         return forecast
 
-    def _remaining_daylight_minutes(self):
+    def _get_daylight_window(self):
+        """Returns (start_offset, end_offset, known) of the next daylight window.
+
+        Offsets are minutes from now. Scheint die Sonne gerade, beginnt das
+        Fenster bei 0 und endet zum Sonnenuntergang. Sonst umfasst es den
+        nächsten Sonnenaufgang bis Sonnenuntergang. `known` ist True, wenn die
+        Zeiten aus `sun.sun` stammen, sonst gilt 07:00 bis 21:00 Uhr.
+        """
         now = dt_util.now()
-        end_of_day = now.replace(hour=21, minute=0, second=0, microsecond=0)
+        sun = self.hass.states.get("sun.sun")
 
-        if now >= end_of_day:
-            return 60
+        if sun is not None:
+            def offset(attribute):
+                raw = sun.attributes.get(attribute)
+                parsed = dt_util.parse_datetime(str(raw)) if raw else None
+                if parsed is None:
+                    return None
+                if parsed.tzinfo is None:
+                    parsed = dt_util.as_local(parsed)
+                return int((parsed - now).total_seconds() // 60)
 
-        return max(60, min(720, int((end_of_day - now).total_seconds() / 60)))
+            setting = offset("next_setting")
+            rising = offset("next_rising")
+            if setting is not None:
+                if sun.state == "below_horizon":
+                    start = max(0, rising) if rising is not None else None
+                    if start is not None and setting > start:
+                        return start, setting, True
+                else:
+                    return 0, max(1, setting), True
+
+        now_minutes = (now.hour * 60) + now.minute
+        if now_minutes < DEFAULT_SUNRISE_MINUTES:
+            return DEFAULT_SUNRISE_MINUTES - now_minutes, DEFAULT_SUNSET_MINUTES - now_minutes, False
+        if now_minutes < DEFAULT_SUNSET_MINUTES:
+            return 0, DEFAULT_SUNSET_MINUTES - now_minutes, False
+        return (
+            (1440 - now_minutes) + DEFAULT_SUNRISE_MINUTES,
+            (1440 - now_minutes) + DEFAULT_SUNSET_MINUTES,
+            False
+        )
 
     def _get_float_state(self, entity_id, fallback=None):
         if not entity_id:
@@ -1377,18 +1433,22 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         """Findet das optimale Zeitfenster unter Berücksichtigung der Zielabdeckung."""
         profile_len = len(profile)
         forecast_len = len(forecast)
+        requested_earliest = max(0, int(earliest_start_offset))
         if profile_len >= forecast_len:
-            return 0, 0.0, 0.0
-        
+            return requested_earliest, 0.0, 0.0
+
+        # Der früheste erlaubte Start (Startfenster, Mindestpause) darf nie nach
+        # vorne geklemmt werden. Liegt er hinter dem Forecast-Horizont, gibt es
+        # dort keine belastbare Prognose, also keine Deckung.
+        max_start_by_forecast = forecast_len - profile_len
+        if requested_earliest > max_start_by_forecast:
+            return requested_earliest, 0.0, 0.0
+
         windows = []
-        latest_start = min(forecast_len - profile_len, max(0, int(latest_start_offset)))
-        earliest_start = max(0, min(int(earliest_start_offset), latest_start))
+        earliest_start = requested_earliest
+        latest_start = min(max_start_by_forecast, max(earliest_start, int(latest_start_offset)))
         first_start = ((earliest_start + 14) // 15) * 15
-        candidate_starts = []
-        if earliest_start <= latest_start:
-            candidate_starts.append(earliest_start)
-        if first_start == earliest_start:
-            candidate_starts = []
+        candidate_starts = [] if first_start == earliest_start else [earliest_start]
         candidate_starts.extend(range(first_start, latest_start + 1, 15))
 
         for start_min in candidate_starts:

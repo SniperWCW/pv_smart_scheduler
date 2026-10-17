@@ -1,4 +1,4 @@
-const CARD_VERSION = '0.3.0-beta.4';
+const CARD_VERSION = '0.3.0-beta.5';
 
 class PVSmartSchedulerCard extends HTMLElement {
   set hass(hass) {
@@ -6,7 +6,9 @@ class PVSmartSchedulerCard extends HTMLElement {
     const stateObj = hass.states[entityId];
 
     if (!stateObj) {
-      this.innerHTML = `<ha-card style="padding: 16px; color: red;">Entität ${entityId} nicht gefunden!</ha-card>`;
+      this.innerHTML = `<ha-card style="padding: 16px; color: var(--error-color, red);">Entität ${this.escapeHtml(entityId)} nicht gefunden!</ha-card>`;
+      // Das Karten-Template wurde überschrieben und muss beim nächsten Update neu aufgebaut werden.
+      this.content = null;
       return;
     }
 
@@ -108,16 +110,25 @@ class PVSmartSchedulerCard extends HTMLElement {
     // Header Infos aktualisieren
     const batSoc = stateObj.attributes.battery_soc;
     const batWarn = stateObj.attributes.battery_night_warning;
-    if (batSoc !== undefined) {
+    // Ohne Batterie-SoC liefert das Backend null. Dann wird kein Akku-Status angezeigt.
+    const batSocValue = batSoc === null || batSoc === undefined || batSoc === '' ? NaN : Number(batSoc);
+    if (Number.isFinite(batSocValue)) {
       this.headerBattery.innerHTML = `
         <div style="display: flex; align-items: center; gap: 4px; color: ${batWarn ? 'var(--error-color, #f44336)' : 'var(--secondary-text-color)'};">
           <ha-icon icon="${batWarn ? 'mdi:battery-alert' : 'mdi:battery-check'}" style="--mdc-icon-size: 16px;"></ha-icon>
-          <span>Akku: ${batSoc}% ${batWarn ? '(Knapp für Nacht)' : ''}</span>
+          <span>Akku: ${this.formatNumber(batSocValue, 0)}% ${batWarn ? '(Knapp für Nacht)' : ''}</span>
         </div>
       `;
+    } else {
+      this.headerBattery.innerHTML = '';
     }
     const avgPower = stateObj.attributes.forecast_average_power;
-    this.headerForecast.innerHTML = avgPower ? `<span style="color: var(--secondary-text-color);">Ø Prognose: ${this.formatNumber(avgPower, 0)} W</span>` : '';
+    const forecastStatus = stateObj.attributes.forecast_status;
+    if (forecastStatus === 'unavailable' || forecastStatus === 'invalid') {
+      this.headerForecast.innerHTML = `<span style="color: var(--error-color, #f44336);">${forecastStatus === 'invalid' ? 'Prognose ungültig' : 'Prognose nicht verfügbar'}</span>`;
+    } else {
+      this.headerForecast.innerHTML = avgPower ? `<span style="color: var(--secondary-text-color);">Ø Prognose: ${this.formatNumber(avgPower, 0)} W</span>` : '';
+    }
     this.headerVersion.textContent = `Card ${CARD_VERSION}`;
     const readyCount = devices.filter((device) => device.recommendation === 'ja' && !device.is_running).length;
     const forecastKwh = this.getFirstNumber(stateObj.attributes, ['forecast_remaining_kwh'], null);

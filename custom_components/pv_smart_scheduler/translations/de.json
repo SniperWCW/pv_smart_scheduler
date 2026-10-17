@@ -59,6 +59,9 @@
     }
   },
   "options": {
+    "abort": {
+      "no_devices": "Es sind keine Geräte zum Bearbeiten oder Löschen konfiguriert."
+    },
     "step": {
       "init": {
         "menu_options": {

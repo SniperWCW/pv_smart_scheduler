@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.3.0-beta.5
+
+- Fixed the numeric parser: values such as `1.942` or `12.345` were read as thousands (1942 / 12345). A single separator is now always a decimal separator.
+- Fixed kWh forecasts without `detailedForecast`: the remaining energy is only spread over the daylight window (from `sun.sun`, fallback 07:00 to 21:00) and is 0 W at night. Watt fallback forecasts are also cut off outside daylight when `sun.sun` is available.
+- Fixed the start window search: the earliest allowed start (schedule window, minimum pause) is no longer clamped to an earlier time when the profile does not fit the forecast horizon.
+- Forecast quality is now 0 % when the PV forecast is unavailable or invalid instead of showing 85 %.
+- Fixed `battery_min_soc = 0` being replaced by 25 when adding another device.
+- Optional global sensors can be cleared again in the options flow and in the add-device form.
+- Settings changed in the add-device form are no longer overridden by older option values.
+- Added the missing `no_devices` abort text for the options flow.
+- Card: no more "Akku: null%" without a battery sensor, the card recovers after a missing entity appears, and it shows when the forecast is unavailable.
 ## v0.3.0-beta.4
 
 - Made unavailable or invalid PV forecasts fail closed instead of assuming fictitious solar production.
