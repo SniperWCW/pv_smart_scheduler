@@ -30,7 +30,7 @@ Beim Start und beim Einrichten eines Config Entries versucht die Integration zus
 
 - nur im Lovelace-Storage-Modus
 - mit `type: module`
-- mit versionierter URL (`?v=<Integrationsversion>`, z. B. `?v=0.3.0-beta.5`)
+- mit versionierter URL (`?v=<Integrationsversion>`, z. B. `?v=0.4.0`)
 
 Wenn bereits eine Resource mit derselben Basis-URL existiert, wird sie auf die aktuelle Version aktualisiert statt doppelt angelegt.
 

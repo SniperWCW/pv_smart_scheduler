@@ -1,4 +1,4 @@
-const CARD_VERSION = '0.3.0-beta.5';
+const CARD_VERSION = '0.4.0';
 
 class PVSmartSchedulerCard extends HTMLElement {
   set hass(hass) {
