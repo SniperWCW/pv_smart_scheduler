@@ -55,20 +55,24 @@ Bei jedem Update:
 
 ## Verbrauchsprofile
 
-Die Funktion `_get_adaptive_profile(entity_id)` nutzt die Recorder-Historie der letzten 14 Tage.
+Die Funktion `_get_adaptive_profile(entity_id, state_sensor_id)` nutzt die Recorder-Historie der letzten 14 Tage.
 
 Logik:
 
-- Werte unter `DEVICE_ACTIVE_POWER_THRESHOLD` werden als Standby/aus betrachtet.
-- Der letzte abgeschlossene aktive Zyklus wird gesucht.
-- Der Zyklus wird auf ein 1-Minuten-Profil resampled.
-- Profile unter 20 Minuten oder unter 50 Wh werden verworfen.
+- Die Historie wird auf ein 1-Minuten-Raster gebracht. Kurze Ausfälle (`unavailable`/`unknown`, bis 10 Minuten) schreiben den letzten gültigen Wert fort, längere zählen als 0 W.
+- Ist ein Geräte-Statussensor mit `on`/`running`/`cool`/... konfiguriert und hat in der Historie aktive Phasen, begrenzt dieser einen Lauf (Pausen bis 5 Minuten werden überbrückt).
+- Sonst gehört eine Pause von bis zu 60 Minuten (`PROFILE_QUIET_MINUTES`) zum selben Lauf. Ein Waschgang oder Spülgang zerfällt dadurch nicht in einzelne Heizphasen.
+- Noch nicht beendete Läufe werden nicht gelernt.
+- Werte unter `DEVICE_ACTIVE_POWER_THRESHOLD` zählen als 0 W, führende und abschließende Nullminuten werden entfernt.
+- Läufe unter 10 Minuten oder unter 50 Wh werden verworfen, ein Lauf wird auf maximal 360 Minuten gekürzt.
+- Aus bis zu fünf Läufen wird der repräsentativste (Median von Dauer und Energie) gewählt.
 - Gelernt wird in `pv_smart_scheduler_profiles_v3.json` im Home-Assistant-Konfigurationspfad.
+- Beim Laden werden gespeicherte Profile erneut bereinigt (z. B. führende Nullminuten aus älteren Versionen).
 
 Fallback:
 
-- Wenn kein brauchbares Profil existiert, wird `[300] * 120` verwendet.
-- Das entspricht 120 Minuten bei 300 W.
+- Findet sich in 14 Tagen kein abgeschlossener Lauf, bleibt das bisherige Profil erhalten.
+- Gibt es kein Profil, wird nicht mit einer erfundenen Kurve geplant (`plan_reason: profile_missing`).
 
 ## Laufstatus
 

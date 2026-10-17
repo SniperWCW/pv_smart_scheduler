@@ -20,6 +20,20 @@ from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 PROFILE_LOOKBACK_DAYS = 14
 PROFILE_SAMPLE_LIMIT = 5
+# Ohne Statussensor gehört eine Pause bis zu dieser Länge noch zum selben Lauf
+# (Waschmaschinen und Geschirrspüler pausieren zwischen den Heizphasen).
+PROFILE_QUIET_MINUTES = 60
+# So lange wird der letzte gültige Wert bei unavailable/unknown fortgeschrieben.
+PROFILE_DROPOUT_MINUTES = 10
+PROFILE_MAX_MINUTES = 360
+PROFILE_MIN_MINUTES = 10
+INACTIVE_STATE_VALUES = frozenset({
+    "off", "idle", "standby", "unavailable", "unknown", "0", "false", "closed"
+})
+ACTIVE_STATE_VALUES = frozenset({
+    "on", "open", "true", "running", "active", "cool", "cooling", "heat",
+    "heating", "dry", "fan_only", "auto"
+})
 DEFAULT_BATTERY_MIN_SOC = 25
 DEVICE_ACTIVE_POWER_THRESHOLD = 15
 # 36 Stunden: genug, um abends auch den morgigen Vormittag einzuplanen.
@@ -34,7 +48,7 @@ MAX_PROFILE_POWER_W = 25000
 MAX_PROFILE_ENERGY_WH = 50000
 ACTIVE_STATE_SENSOR_GRACE_MINUTES = 90
 CARD_MODULE_FILENAME = "pv-smart-scheduler-card.js"
-INTEGRATION_VERSION = "0.4.1"
+INTEGRATION_VERSION = "0.4.2"
 CARD_RESOURCE_BASE_URL = f"/{DOMAIN}/{CARD_MODULE_FILENAME}"
 CARD_RESOURCE_URL = f"{CARD_RESOURCE_BASE_URL}?v={INTEGRATION_VERSION}"
 
@@ -331,7 +345,13 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
 
             cleaned_profile.append(round(numeric_value, 3))
 
-        if len(cleaned_profile) < 10:
+        # Führende und abschließende Nullminuten gehören nicht zum Lauf.
+        while cleaned_profile and cleaned_profile[0] <= 0:
+            cleaned_profile.pop(0)
+        while cleaned_profile and cleaned_profile[-1] <= 0:
+            cleaned_profile.pop()
+
+        if len(cleaned_profile) < PROFILE_MIN_MINUTES:
             return None
 
         total_energy_wh = sum(cleaned_profile) / 60.0
@@ -441,30 +461,8 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         """Returns device activity using power and an optional state sensor."""
         if state_sensor_state is not None:
             raw_state = str(state_sensor_state.state or "").lower()
-            inactive_states = {
-                "off",
-                "idle",
-                "standby",
-                "unavailable",
-                "unknown",
-                "0",
-                "false",
-                "closed"
-            }
-            active_states = {
-                "on",
-                "open",
-                "true",
-                "running",
-                "active",
-                "cool",
-                "cooling",
-                "heat",
-                "heating",
-                "dry",
-                "fan_only",
-                "auto"
-            }
+            inactive_states = INACTIVE_STATE_VALUES
+            active_states = ACTIVE_STATE_VALUES
 
             if raw_state in inactive_states:
                 return False
@@ -607,7 +605,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
 
         for entity_id, config in sorted_devices:
             try:
-                profile = await self._get_adaptive_profile(entity_id)
+                profile = await self._get_adaptive_profile(entity_id, config.get("device_state_sensor"))
                 state = self.hass.states.get(entity_id)
                 current_device_power = self._parse_state_value(state) or 0.0
                 device_state_sensor = config.get("device_state_sensor")
@@ -839,16 +837,19 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         now_minutes = (now.hour * 60) + now.minute
         return target_minutes - now_minutes if target_minutes >= now_minutes else (1440 - now_minutes) + target_minutes
 
-    async def _get_adaptive_profile(self, entity_id):
-        """Erstellt ein zeitlich korrektes 1-Minuten-Leistungsprofil aus der Historie."""
+    async def _get_adaptive_profile(self, entity_id, state_sensor_id=None):
+        """Lernt ein 1-Minuten-Leistungsprofil aus den letzten abgeschlossenen Läufen."""
         now = dt_util.utcnow()
         cached_profile = self.learned_profiles.get(entity_id)
         normalized_cached_profile = self._normalize_profile(cached_profile) if cached_profile is not None else None
-        if cached_profile is not None and normalized_cached_profile is None:
-            self.learned_profiles.pop(entity_id, None)
+        if cached_profile is not None and normalized_cached_profile != cached_profile:
+            # Ungültige oder alte Profile (z. B. mit führenden Nullminuten) bereinigen.
+            if normalized_cached_profile is None:
+                self.learned_profiles.pop(entity_id, None)
+            else:
+                self.learned_profiles[entity_id] = normalized_cached_profile
             await self.hass.async_add_executor_job(self.save_learned_profiles)
-            cached_profile = None
-        
+
         # Throttling: Historie nur einmal pro Stunde abfragen oder wenn Profil fehlt
         last_check = self._profile_query_timestamps.get(entity_id, dt_util.utc_from_timestamp(0))
         if normalized_cached_profile is not None and (now - last_check).total_seconds() < 3600:
@@ -856,120 +857,147 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
 
         self._profile_query_timestamps[entity_id] = now
 
-        now = dt_util.utcnow()
+        entity_ids = [entity_id]
+        if state_sensor_id and state_sensor_id != entity_id:
+            entity_ids.append(state_sensor_id)
         history_dict = await self.hass.async_add_executor_job(
-            history.get_significant_states, self.hass, now - timedelta(days=PROFILE_LOOKBACK_DAYS), now, [entity_id]
+            history.get_significant_states,
+            self.hass,
+            now - timedelta(days=PROFILE_LOOKBACK_DAYS),
+            now,
+            entity_ids
         )
 
-        # Ohne gelerntes Profil wird bewusst nicht mehr mit einer erfundenen
+        # Ohne gelerntes Profil wird bewusst nicht mit einer erfundenen
         # Verbrauchskurve geplant. Das verhindert falsche Sofort-Empfehlungen.
-        default_profile = []
-        states = history_dict.get(entity_id, [])
-        if not states:
-            return normalized_cached_profile or default_profile
+        power_states = history_dict.get(entity_id, [])
+        if not power_states:
+            return normalized_cached_profile or []
 
-        recent_profiles = self._extract_recent_completed_profiles(states)
+        state_sensor_states = history_dict.get(state_sensor_id, []) if state_sensor_id else []
+        recent_profiles = self._extract_recent_completed_profiles(
+            power_states,
+            state_sensor_states,
+            now
+        )
         if recent_profiles:
             representative_profile = self._select_representative_profile(recent_profiles)
             self.learned_profiles[entity_id] = representative_profile
             await self.hass.async_add_executor_job(self.save_learned_profiles)
             return representative_profile
 
-        # 1. Finde den letzten BEENDETEN Zyklus (Übergang von Aktiv zu Inaktiv)
-        # Wir gehen von hinten nach vorne durch die Historie
-        last_active_idx = -1
-        for i in range(len(states) - 2, -1, -1):
-            val_current = self._parse_state_value(states[i])
-            val_next = self._parse_state_value(states[i+1])
-            
-            if val_current is not None and val_current > DEVICE_ACTIVE_POWER_THRESHOLD:
-                if val_next is not None and val_next <= DEVICE_ACTIVE_POWER_THRESHOLD:
-                    last_active_idx = i
-                    break
+        return normalized_cached_profile or []
 
-        if last_active_idx == -1:
-            return normalized_cached_profile or default_profile
+    def _minute_series(self, states, start, minutes, parse):
+        """Step-Funktion der Zustände auf einem 1-Minuten-Raster.
 
-        # 2. Finde den Start dieses aktiven Zyklus (gehe zurück bis eine Lücke > 20 Min auftritt)
-        start_active_idx = last_active_idx
-        for i in range(last_active_idx, 0, -1):
-            try:
-                diff = (states[i].last_changed - states[i-1].last_changed).total_seconds()
-                if diff > 1200: # 20 Minuten Inaktivität beenden die Phase
-                    break
-                start_active_idx = i - 1
-            except (ValueError, TypeError):
+        parse(state) liefert den Wert oder None (unavailable/unknown). Kurze
+        Ausfälle schreiben den letzten gültigen Wert fort, längere zählen als 0.
+        """
+        series = []
+        pointer = -1
+        last_valid = 0.0
+        last_valid_at = None
+        for minute in range(minutes):
+            moment = start + timedelta(minutes=minute)
+            while pointer + 1 < len(states) and states[pointer + 1].last_changed <= moment:
+                pointer += 1
+            if pointer < 0:
+                series.append(0.0)
                 continue
+            current = parse(states[pointer])
+            if current is not None:
+                last_valid = current
+                last_valid_at = moment
+                series.append(current)
+            elif last_valid_at is not None and (moment - last_valid_at).total_seconds() <= PROFILE_DROPOUT_MINUTES * 60:
+                series.append(last_valid)
+            else:
+                series.append(0.0)
+        return series
 
-        # 3. Resampling auf 1-Minuten-Intervalle
-        start_dt = states[start_active_idx].last_changed
-        end_dt = states[last_active_idx].last_changed
-        duration_mins = int((end_dt - start_dt).total_seconds() / 60)
+    def _parse_state_active(self, state):
+        raw = str(getattr(state, "state", "") or "").lower()
+        if raw in ACTIVE_STATE_VALUES:
+            return 1.0
+        return 0.0
 
-        if duration_mins < 10: # Zu kurze Phasen ignorieren
-            return default_profile
+    def _extract_recent_completed_profiles(self, states, state_sensor_states=None, now=None):
+        """Erkennt abgeschlossene Läufe und gibt ihre Profile zurück (neueste zuerst).
 
-        duration_mins = min(duration_mins, 360) # Max 6 Stunden
-        resampled_profile = []
-        current_state_ptr = start_active_idx
+        Ein Lauf wird bevorzugt über den Statussensor abgegrenzt (on bis off).
+        Ohne brauchbaren Statussensor endet ein Lauf erst nach einer
+        durchgehenden Pause von PROFILE_QUIET_MINUTES. Dadurch zerfällt ein
+        Waschgang nicht mehr in einzelne Heizphasen.
+        """
+        if not states:
+            return []
 
-        for m in range(duration_mins + 1):
-            check_time = start_dt + timedelta(minutes=m)
-            while (current_state_ptr + 1 <= last_active_idx and 
-                   states[current_state_ptr + 1].last_changed <= check_time):
-                current_state_ptr += 1
-            
-            raw_val = self._parse_state_value(states[current_state_ptr])
-            # Noise-Filter: Werte unter dem Schwellenwert werden als 0W gewertet,
-            # um Standby-Rauschen nicht in das Lernprofil zu übernehmen.
-            clean_val = raw_val if raw_val is not None else 0.0
-            if clean_val < DEVICE_ACTIVE_POWER_THRESHOLD:
-                clean_val = 0.0
-            resampled_profile.append(clean_val)
+        now = now or dt_util.utcnow()
+        start = min(state.last_changed for state in states)
+        total_minutes = int((now - start).total_seconds() // 60)
+        if total_minutes < PROFILE_MIN_MINUTES:
+            return []
 
-        # Qualitäts-Check: Nur speichern, wenn das Profil lang genug ist 
-        # UND eine Mindestmenge an Energie (Wh) enthält (verhindert Standby-Lernen)
-        total_energy_wh = (sum(resampled_profile) / 60)
-        normalized_profile = self._normalize_profile(resampled_profile)
-        if normalized_profile is not None:
-            self.learned_profiles[entity_id] = normalized_profile
-            await self.hass.async_add_executor_job(self.save_learned_profiles)
-            return normalized_profile
+        power = self._minute_series(
+            states,
+            start,
+            total_minutes,
+            lambda state: self._parse_state_value(state)
+        )
+        cycles = []
 
-        return normalized_cached_profile or default_profile
+        status = []
+        if state_sensor_states:
+            status = self._minute_series(
+                sorted(state_sensor_states, key=lambda state: state.last_changed),
+                start,
+                total_minutes,
+                self._parse_state_active
+            )
 
-    def _extract_recent_completed_profiles(self, states):
+        if status and any(value > 0 for value in status):
+            # Statussensor: zusammenhängende aktive Abschnitte, kleine Lücken überbrücken.
+            minute = 0
+            while minute < total_minutes:
+                if status[minute] > 0:
+                    end = minute
+                    last_active = minute
+                    while end < total_minutes and end - last_active <= 5:
+                        if status[end] > 0:
+                            last_active = end
+                        end += 1
+                    if end >= total_minutes:
+                        break  # noch laufend
+                    cycles.append((minute, last_active + 1))
+                    minute = end
+                else:
+                    minute += 1
+        else:
+            # Nur Leistung: Pausen unter PROFILE_QUIET_MINUTES gehören zum Lauf.
+            minute = 0
+            while minute < total_minutes:
+                if power[minute] > DEVICE_ACTIVE_POWER_THRESHOLD:
+                    last_active = minute
+                    end = minute
+                    while end < total_minutes and end - last_active <= PROFILE_QUIET_MINUTES:
+                        if power[end] > DEVICE_ACTIVE_POWER_THRESHOLD:
+                            last_active = end
+                        end += 1
+                    if end >= total_minutes and end - last_active <= PROFILE_QUIET_MINUTES:
+                        break  # Pause noch nicht lang genug: Lauf ist vermutlich nicht beendet
+                    cycles.append((minute, last_active + 1))
+                    minute = end
+                else:
+                    minute += 1
+
         profiles = []
-        for end_idx in range(len(states) - 1, 0, -1):
-            active_power = self._parse_state_value(states[end_idx - 1])
-            next_power = self._parse_state_value(states[end_idx])
-            if active_power is None or next_power is None or active_power <= DEVICE_ACTIVE_POWER_THRESHOLD or next_power > DEVICE_ACTIVE_POWER_THRESHOLD:
+        for cycle_start, cycle_end in reversed(cycles):
+            if cycle_end - cycle_start < PROFILE_MIN_MINUTES:
                 continue
-
-            start_idx = end_idx - 1
-            while start_idx > 0:
-                previous_power = self._parse_state_value(states[start_idx - 1])
-                gap = (states[start_idx].last_changed - states[start_idx - 1].last_changed).total_seconds()
-                if previous_power is None or previous_power <= DEVICE_ACTIVE_POWER_THRESHOLD or gap > 1200:
-                    break
-                start_idx -= 1
-
-            start = states[start_idx].last_changed
-            end = states[end_idx].last_changed
-            duration = min(360, int((end - start).total_seconds() / 60))
-            if duration < 10:
-                continue
-
-            profile = []
-            pointer = start_idx
-            for minute in range(duration):
-                check_time = start + timedelta(minutes=minute)
-                while pointer + 1 < end_idx and states[pointer + 1].last_changed <= check_time:
-                    pointer += 1
-                power = self._parse_state_value(states[pointer]) or 0.0
-                profile.append(power if power >= DEVICE_ACTIVE_POWER_THRESHOLD else 0.0)
-
-            normalized = self._normalize_profile(profile)
+            segment = power[cycle_start:min(cycle_end, cycle_start + PROFILE_MAX_MINUTES)]
+            segment = [value if value >= DEVICE_ACTIVE_POWER_THRESHOLD else 0.0 for value in segment]
+            normalized = self._normalize_profile(segment)
             if normalized:
                 profiles.append(normalized)
             if len(profiles) >= PROFILE_SAMPLE_LIMIT:

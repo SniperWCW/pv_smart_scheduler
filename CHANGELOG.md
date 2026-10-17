@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.4.2
+
+- Fixed profile learning: a run is no longer split into fragments at every low-power pause. A washing machine cycle of about 2.5 hours was learned as a 15 minute, 0.06 kWh piece and a dishwasher cycle as an 18 minute piece, so the planner badly underestimated their energy. Runs are now delimited by the device status sensor (on to off) when it has recorded active phases, otherwise a pause of up to 60 minutes belongs to the same run.
+- Short sensor dropouts (`unavailable`/`unknown`, up to 10 minutes) no longer insert zero minutes into a learned profile.
+- Leading and trailing zero minutes are removed from profiles, and stored profiles are cleaned when loaded. A profile consisting of 628 minutes of zeros followed by a 9 minute run is now discarded.
+- Runs that have not finished yet are not learned.
+
 ## v0.4.1
 
 - New optional setting "PV-Prognosesensor Morgen" (kWh, or `detailedForecast` for Solcast). When the daily window is over or too weak, the planner now also checks the same schedule window on the next day and proposes the best start there ("Morgen 08:00").
