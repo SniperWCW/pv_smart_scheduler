@@ -48,7 +48,7 @@ MAX_PROFILE_POWER_W = 25000
 MAX_PROFILE_ENERGY_WH = 50000
 ACTIVE_STATE_SENSOR_GRACE_MINUTES = 90
 CARD_MODULE_FILENAME = "pv-smart-scheduler-card.js"
-INTEGRATION_VERSION = "0.4.2"
+INTEGRATION_VERSION = "0.4.3"
 CARD_RESOURCE_BASE_URL = f"/{DOMAIN}/{CARD_MODULE_FILENAME}"
 CARD_RESOURCE_URL = f"{CARD_RESOURCE_BASE_URL}?v={INTEGRATION_VERSION}"
 
@@ -1035,22 +1035,61 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
 
         today_window, tomorrow_window, window_known = self._get_daylight_windows()
 
-        def spread(forecast, window, kwh, only_empty=False):
-            """Verteilt eine Tagesenergie gleichmäßig auf ein Tageslichtfenster."""
+        def spread(forecast, window, kwh, only_empty=False, shape=None):
+            """Verteilt eine Tagesenergie glockenförmig auf ein Tageslichtfenster.
+
+            Die Sonne liefert mittags am meisten. Eine konstante Leistung würde
+            die Mittagsspitze verschlucken und die Deckung klein rechnen. `shape`
+            ist das volle Tagesfenster, wenn `window` nur der Rest davon ist.
+            """
             start, end = window
             length = max(60, end - start)
-            power = max(0.0, (kwh * 1000.0) / (length / 60.0))
-            for minute in range(max(0, start), min(FORECAST_HORIZON_MINUTES, start + length)):
+            shape_start, shape_end = shape if shape else (start, start + length)
+            shape_length = max(60, shape_end - shape_start)
+            minutes = list(range(max(0, start), min(FORECAST_HORIZON_MINUTES, start + length)))
+            weights = [
+                max(0.0, math.sin(math.pi * (minute - shape_start + 0.5) / shape_length))
+                for minute in minutes
+            ]
+            total = sum(weights)
+            if total <= 0:
+                weights = [1.0] * len(minutes)
+                total = float(len(minutes)) or 1.0
+            # Summe der Minutenwerte in W / 60 ergibt die Energie in Wh.
+            scale = kwh * 1000.0 * 60.0 / total
+            for minute, weight in zip(minutes, weights):
                 if not only_empty or forecast[minute] == 0.0:
-                    forecast[minute] = power
-            return power
+                    forecast[minute] = scale * weight
+            return max(0.0, (kwh * 1000.0) / (length / 60.0))
+
+        # Volles Tagesfenster von heute: Sonnenaufgang liegt 1440 Minuten vor dem von morgen.
+        today_shape = (tomorrow_window[0] - 1440, today_window[1]) if today_window else None
+
+        # Hat der Morgen-Sensor eine detailedForecast (Solcast), wird deren echte
+        # Tageskurve genutzt, sonst die glockenförmig verteilte Tagesenergie.
+        tomorrow_profile = None
+        if tomorrow_state is not None:
+            tomorrow_detailed_list = tomorrow_state.attributes.get("detailedForecast")
+            if isinstance(tomorrow_detailed_list, list):
+                tomorrow_profile = self._forecast_from_detailed_intervals(tomorrow_detailed_list)
+
+        def add_tomorrow(forecast, only_empty=False):
+            if tomorrow_profile is not None:
+                for minute, value in enumerate(tomorrow_profile):
+                    if value > 0 and (not only_empty or forecast[minute] == 0.0):
+                        forecast[minute] = value
+                return None
+            if tomorrow_kwh is not None:
+                return spread(forecast, tomorrow_window, tomorrow_kwh, only_empty=only_empty)
+            return None
+
+        tomorrow_available = tomorrow_profile is not None or tomorrow_kwh is not None
 
         if not state or state.state in ("unknown", "unavailable"):
             context["forecast_status"] = "unavailable"
             forecast = [0.0] * FORECAST_HORIZON_MINUTES
             # Fällt die heutige Prognose aus, kann morgen trotzdem geplant werden.
-            if tomorrow_kwh is not None:
-                spread(forecast, tomorrow_window, tomorrow_kwh)
+            add_tomorrow(forecast)
             return forecast, context
 
         unit = state.attributes.get("unit_of_measurement")
@@ -1067,13 +1106,14 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                 tomorrow_detailed_used = False
             forecast = self._forecast_from_detailed_intervals(intervals)
             if forecast:
-                if tomorrow_kwh is not None and not tomorrow_detailed_used:
-                    spread(forecast, tomorrow_window, tomorrow_kwh, only_empty=True)
+                if not tomorrow_detailed_used:
+                    add_tomorrow(forecast, only_empty=True)
                 context["forecast_average_power"] = round(sum(forecast[:720]) / 720, 1)
-                try:
-                    context["forecast_remaining_kwh"] = round(float(state.attributes.get("estimate", state.state)), 3)
-                except (TypeError, ValueError):
-                    context["forecast_remaining_kwh"] = None
+                # Restenergie bis Mitternacht aus der Prognose selbst. Das
+                # Attribut `estimate` ist bei Solcast die ganze Tagesprognose.
+                now_local = dt_util.now()
+                minutes_to_midnight = max(0, 1440 - ((now_local.hour * 60) + now_local.minute))
+                context["forecast_remaining_kwh"] = round(sum(forecast[:minutes_to_midnight]) / 60000.0, 3)
                 return forecast, context
 
         try:
@@ -1081,14 +1121,13 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         except (TypeError, ValueError):
             context["forecast_status"] = "invalid"
             forecast = [0.0] * FORECAST_HORIZON_MINUTES
-            if tomorrow_kwh is not None:
-                spread(forecast, tomorrow_window, tomorrow_kwh)
+            add_tomorrow(forecast)
             return forecast, context
 
         if unit and unit.lower() in ("kwh", "kw h"):
             forecast = [0.0] * FORECAST_HORIZON_MINUTES
             context["forecast_remaining_kwh"] = round(forecast_value, 3)
-            if today_window is None and tomorrow_kwh is None:
+            if today_window is None and not tomorrow_available:
                 # Ohne Morgen-Sensor gilt wie bisher: Die Energie wird auf das
                 # nächste Tageslichtfenster verteilt.
                 average_power = spread(forecast, tomorrow_window, forecast_value)
@@ -1097,11 +1136,10 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                 # dafür kein Fenster mehr, morgen kommt vom Morgen-Sensor.
                 average_power = 0.0
                 if today_window is not None:
-                    average_power = spread(forecast, today_window, forecast_value)
-                if tomorrow_kwh is not None:
-                    tomorrow_power = spread(forecast, tomorrow_window, tomorrow_kwh)
-                    if today_window is None:
-                        average_power = tomorrow_power
+                    average_power = spread(forecast, today_window, forecast_value, shape=today_shape)
+                tomorrow_power = add_tomorrow(forecast)
+                if today_window is None and tomorrow_power is not None:
+                    average_power = tomorrow_power
             context["forecast_average_power"] = round(average_power, 1)
             return forecast, context
 
@@ -1115,8 +1153,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             for minute in range(FORECAST_HORIZON_MINUTES):
                 if not (next_start <= minute < next_end):
                     forecast[minute] = 0.0
-        if tomorrow_kwh is not None:
-            spread(forecast, tomorrow_window, tomorrow_kwh, only_empty=True)
+        add_tomorrow(forecast, only_empty=True)
         return forecast, context
 
     def _read_energy_kwh(self, state):
@@ -1134,7 +1171,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         return max(0.0, value)
 
     def _forecast_from_detailed_intervals(self, intervals):
-        """Builds a 1-minute W forecast from Solcast-style kWh intervals."""
+        """Builds a 1-minute W forecast from Solcast-style kW intervals."""
         now = dt_util.now()
         horizon_end = now + timedelta(minutes=FORECAST_HORIZON_MINUTES)
         parsed = []
@@ -1149,22 +1186,23 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             if start.tzinfo is None:
                 start = dt_util.as_local(start)
 
+            # Solcast liefert pv_estimate als mittlere Leistung der Periode in kW
+            # (30-Minuten-Wert 0,94 = 940 W), nicht als Energie der Periode.
             try:
-                estimate_kwh = float(item.get("pv_estimate", 0.0))
+                estimate_kw = float(item.get("pv_estimate", 0.0))
             except (TypeError, ValueError):
-                estimate_kwh = 0.0
+                estimate_kw = 0.0
 
-            parsed.append((start, estimate_kwh))
+            parsed.append((start, estimate_kw))
 
         parsed.sort(key=lambda value: value[0])
         if len(parsed) < 2:
             return None
 
         forecast = [0.0] * FORECAST_HORIZON_MINUTES
-        for index, (start, estimate_kwh) in enumerate(parsed):
+        for index, (start, estimate_kw) in enumerate(parsed):
             next_start = parsed[index + 1][0] if index + 1 < len(parsed) else start + timedelta(minutes=30)
-            interval_minutes = max(1, int((next_start - start).total_seconds() / 60))
-            average_power = max(0.0, estimate_kwh * 1000.0 / (interval_minutes / 60.0))
+            average_power = max(0.0, estimate_kw * 1000.0)
 
             overlap_start = max(start, now)
             overlap_end = min(next_start, horizon_end)

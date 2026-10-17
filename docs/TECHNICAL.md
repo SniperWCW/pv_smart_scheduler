@@ -103,7 +103,7 @@ Unterstuetzte Quellen:
   - Fallback-Profil sinkt linear leicht ab
 - Sensor in kWh mit `estimate`:
   - wird als Restenergie interpretiert
-  - ohne Detaildaten wird daraus eine konstante Durchschnittsleistung über das Tageslichtfenster berechnet
+  - ohne Detaildaten wird die Energie glockenförmig (Halbsinus) über das Tageslichtfenster verteilt, Spitze etwa das 1,57-Fache des Durchschnitts
   - das Fenster stammt aus `sun.sun` (`next_rising`/`next_setting`), ohne diese Entität gilt 07:00 bis 21:00 Uhr
   - außerhalb des Fensters ist die Prognose 0 W
   - heute gilt der Wert nur bis Sonnenuntergang; nach Sonnenuntergang gibt es für heute kein Fenster mehr
@@ -111,7 +111,7 @@ Unterstuetzte Quellen:
   - ohne Morgen-Sensor wird die Energie nach Sonnenuntergang wie bisher auf das nächste Fenster gelegt
 - Solcast `detailedForecast`:
   - wird bevorzugt genutzt
-  - jedes 30-Minuten-Intervall mit `pv_estimate` in kWh wird in durchschnittliche W umgerechnet
+  - `pv_estimate` ist bei Solcast die mittlere Leistung der Periode in kW und wird direkt in W umgerechnet (0,94 kW = 940 W)
   - daraus entsteht ein minutengenaues Forecast-Profil
 
 Die Funktion `_build_virtual_pv_forecast(...)` kombiniert diesen Forecast mit aktueller PV-Leistung. Fuer die ersten 90 Minuten wird aktuelle PV-Leistung als konservativer Mindestwert einbezogen.

@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.3
+
+- Fixed Solcast `detailedForecast`: `pv_estimate` is the average power of the period in kW (0.94 means 940 W), but it was treated as energy per period, so every 30 minute value was doubled. The forecast peak now matches the Solcast peak sensor.
+- kWh-only forecasts (for example eedc "rest today" and "tomorrow") are now spread as a bell curve over the daylight window instead of a constant power. The midday peak is no longer swallowed, which made weak days look like they never exceed the base load. The remaining energy of today follows the second half of the bell.
+- The tomorrow sensor may carry a Solcast `detailedForecast`; its real daily curve is then used.
+- "PV-Restprognose" with a Solcast `detailedForecast` is now the energy left until midnight computed from the forecast, not the whole-day `estimate`.
+- Card: a device without a learned profile shows "Kein Profil" instead of a meaningless start time and no timeline bar.
+
 ## v0.4.2
 
 - Fixed profile learning: a run is no longer split into fragments at every low-power pause. A washing machine cycle of about 2.5 hours was learned as a 15 minute, 0.06 kWh piece and a dishwasher cycle as an 18 minute piece, so the planner badly underestimated their energy. Runs are now delimited by the device status sensor (on to off) when it has recorded active phases, otherwise a pause of up to 60 minutes belongs to the same run.

@@ -1,4 +1,4 @@
-const CARD_VERSION = '0.4.2';
+const CARD_VERSION = '0.4.3';
 
 class PVSmartSchedulerCard extends HTMLElement {
   set hass(hass) {
@@ -167,6 +167,7 @@ class PVSmartSchedulerCard extends HTMLElement {
 
         const isToday = !Number.isNaN(startTimeObj.getTime()) && startTimeObj.toDateString() === new Date().toDateString();
         const noPvWindow = !isRunning && device.plan_reason === 'no_pv_window';
+        const noProfile = !isRunning && device.plan_reason === 'profile_missing';
         if (timeLabel && !isToday && !Number.isNaN(startTimeObj.getTime())) {
           timeLabel = `${this.dayLabel(startTimeObj)} ${timeLabel}`;
         }
@@ -176,6 +177,8 @@ class PVSmartSchedulerCard extends HTMLElement {
 
         if (isRunning) {
           bestStartDisplay = 'Läuft';
+        } else if (noProfile) {
+          bestStartDisplay = 'Kein Profil';
         } else if (noPvWindow) {
           bestStartDisplay = 'Kein PV-Fenster';
         } else if (isReady && startMins === 0) {
@@ -198,7 +201,7 @@ class PVSmartSchedulerCard extends HTMLElement {
             </td>
             <td style="padding: 10px 4px; text-align: center;">
               <span style="background: ${statusColor}22; color: ${statusColor}; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; display: inline-block; min-width: 80px;">
-                ${bestStartDisplay} ${!isRunning && !noPvWindow && pvCoverage < (device.target_coverage || 80) ? '⚠️' : ''}
+                ${bestStartDisplay} ${!isRunning && !noPvWindow && !noProfile && pvCoverage < (device.target_coverage || 80) ? '⚠️' : ''}
               </span>
             </td>
             <td style="padding: 10px 4px; text-align: right; font-weight: bold; color: ${statusColor};">
@@ -208,7 +211,7 @@ class PVSmartSchedulerCard extends HTMLElement {
           </tr>
         `;
 
-        if (!isRunning && !noPvWindow && isToday && startTimeStr && !Number.isNaN(startTimeObj.getTime())) {
+        if (!isRunning && !noPvWindow && !noProfile && isToday && startTimeStr && !Number.isNaN(startTimeObj.getTime())) {
           const startOffset = this.dateToTimelineMinutes(
             startTimeObj,
             timelineStartMins,
