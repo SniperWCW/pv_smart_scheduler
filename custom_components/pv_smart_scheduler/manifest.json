@@ -1,7 +1,7 @@
 {
   "domain": "pv_smart_scheduler",
   "name": "PV Smart Scheduler",
-  "codeowners": [SniperWCW],
+  "codeowners": ["@SniperWCW"],
   "dependencies": ["lovelace", "recorder"],
   "documentation": "https://github.com/SniperWCW/pv_smart_scheduler",
   "config_flow": true,
