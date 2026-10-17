@@ -1,4 +1,4 @@
-const CARD_VERSION = '0.4.0';
+const CARD_VERSION = '0.4.1';
 
 class PVSmartSchedulerCard extends HTMLElement {
   set hass(hass) {
@@ -39,7 +39,8 @@ class PVSmartSchedulerCard extends HTMLElement {
             .timeline-axis {
               position: absolute;
               top: -18px;
-              width: 100%;
+              left: 74px;
+              right: 4px;
               display: flex;
               justify-content: space-between;
               font-size: 10px;
@@ -51,7 +52,8 @@ class PVSmartSchedulerCard extends HTMLElement {
               background: var(--secondary-background-color, rgba(0,0,0,0.05));
               margin-bottom: 6px;
               border-radius: 3px;
-              width: 100%;
+              flex: 1;
+              min-width: 0;
             }
             .device-bar {
               position: absolute;
@@ -161,13 +163,21 @@ class PVSmartSchedulerCard extends HTMLElement {
         const pvCoverage = this.getFirstNumber(device, ['pv_coverage'], 0);
         const estimatedKwh = this.getFirstNumber(device, ['estimated_kwh'], 0);
         const batteryUsedKwh = this.getFirstNumber(device, ['battery_used_kwh'], 0);
-        const hasStaleData = device.power_is_stale || device.device_state_is_stale;
+        const sensorWarning = this.sensorWarning(device);
+
+        const isToday = !Number.isNaN(startTimeObj.getTime()) && startTimeObj.toDateString() === new Date().toDateString();
+        const noPvWindow = !isRunning && device.plan_reason === 'no_pv_window';
+        if (timeLabel && !isToday && !Number.isNaN(startTimeObj.getTime())) {
+          timeLabel = `${this.dayLabel(startTimeObj)} ${timeLabel}`;
+        }
 
         let bestStartDisplay = timeLabel || 'Warten';
         const statusColor = isRunning ? 'var(--info-color, #2196f3)' : (isReady ? 'var(--success-color, #4caf50)' : 'var(--warning-color, #ff9800)');
 
         if (isRunning) {
           bestStartDisplay = 'Läuft';
+        } else if (noPvWindow) {
+          bestStartDisplay = 'Kein PV-Fenster';
         } else if (isReady && startMins === 0) {
           bestStartDisplay = 'Sofort';
         }
@@ -184,11 +194,11 @@ class PVSmartSchedulerCard extends HTMLElement {
                 <ha-icon icon="${icon}" style="color: ${statusColor}; --mdc-icon-size: 18px;"></ha-icon>
                 <span>${name}</span>
               </div>
-              <div class="device-details ${hasStaleData ? 'device-warning' : ''}">${hasStaleData ? '⚠ Sensordaten veraltet' : this.escapeHtml(this.deviceStatusLabel(device, isRunning))}</div>
+              <div class="device-details ${sensorWarning ? 'device-warning' : ''}">${this.escapeHtml(sensorWarning || this.deviceStatusLabel(device, isRunning))}</div>
             </td>
             <td style="padding: 10px 4px; text-align: center;">
               <span style="background: ${statusColor}22; color: ${statusColor}; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; display: inline-block; min-width: 80px;">
-                ${bestStartDisplay} ${!isRunning && pvCoverage < (device.target_coverage || 80) ? '⚠️' : ''}
+                ${bestStartDisplay} ${!isRunning && !noPvWindow && pvCoverage < (device.target_coverage || 80) ? '⚠️' : ''}
               </span>
             </td>
             <td style="padding: 10px 4px; text-align: right; font-weight: bold; color: ${statusColor};">
@@ -198,7 +208,7 @@ class PVSmartSchedulerCard extends HTMLElement {
           </tr>
         `;
 
-        if (!isRunning && startTimeStr && !Number.isNaN(startTimeObj.getTime())) {
+        if (!isRunning && !noPvWindow && isToday && startTimeStr && !Number.isNaN(startTimeObj.getTime())) {
           const startOffset = this.dateToTimelineMinutes(
             startTimeObj,
             timelineStartMins,
@@ -267,10 +277,30 @@ class PVSmartSchedulerCard extends HTMLElement {
     if (isRunning) return 'Programm läuft';
     if (device.plan_reason === 'profile_missing') return 'Noch kein gelerntes Verbrauchsprofil';
     if (device.plan_reason === 'minimum_pause') return `Mindestpause: noch ${device.minimum_pause_remaining_mins || 0} Min.`;
+    if (device.plan_reason === 'no_pv_window') return 'Kein ausreichendes PV-Fenster in Sicht';
+    if (device.plan_reason === 'tomorrow_window') return 'Bestes PV-Fenster liegt morgen';
     if (device.plan_reason === 'offpeak_fallback') return 'PV-Ziel nicht erreicht · optionaler Tarifstart';
     if (device.recommendation === 'ja') return 'PV-Fenster verfügbar';
     if (device.recommendation === 'warten') return 'Besseres PV-Fenster abwarten';
     return device.device_state ? `Status: ${device.device_state}` : 'Wird geplant';
+  }
+
+  sensorWarning(device) {
+    if (device.power_problem === 'missing') {
+      return `⚠ Sensor nicht gefunden: ${device.entity_id || ''}`;
+    }
+    if (device.power_problem === 'unavailable') return '⚠ Sensor nicht verfügbar';
+    if (device.device_state_problem === 'missing') return '⚠ Statussensor nicht gefunden';
+    if (device.device_state_problem === 'unavailable') return '⚠ Statussensor nicht verfügbar';
+    if (device.power_is_stale || device.device_state_is_stale) return '⚠ Sensordaten veraltet';
+    return '';
+  }
+
+  dayLabel(date) {
+    const startOfDay = (value) => new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
+    const days = Math.round((startOfDay(date) - startOfDay(new Date())) / 86400000);
+    if (days === 1) return 'Morgen';
+    return date.toLocaleDateString([], { weekday: 'short' });
   }
 
   buildNowMarker(startMins, endMins) {
@@ -278,7 +308,9 @@ class PVSmartSchedulerCard extends HTMLElement {
     if (endMins > 1440 && nowMins < startMins) nowMins += 1440;
     if (nowMins < startMins || nowMins > endMins) return '';
     const left = ((nowMins - startMins) / (endMins - startMins)) * 100;
-    return `<div class="timeline-now" style="left: ${left}%;"></div><div class="timeline-now-label" style="left: ${left}%;">Jetzt</div>`;
+    // Die Spur beginnt hinter der 70px breiten Namensspalte (plus 4px Rand).
+    const position = `calc(74px + (100% - 78px) * ${(left / 100).toFixed(5)})`;
+    return `<div class="timeline-now" style="left: ${position};"></div><div class="timeline-now-label" style="left: ${position};">Jetzt</div>`;
   }
 
   escapeHtml(value) {

@@ -21,6 +21,7 @@ GLOBAL_REQUIRED_KEYS = (
     "schedule_end_time",
 )
 GLOBAL_OPTIONAL_KEYS = (
+    "pv_forecast_tomorrow_sensor",
     "pv_current_power_sensor",
     "battery_soc_sensor",
     "battery_energy_sensor",
@@ -134,6 +135,9 @@ class PVSmartSchedulerConfigFlow(
                 "home_base_load_sensor":
                     user_input["home_base_load_sensor"],
 
+                "pv_forecast_tomorrow_sensor":
+                    user_input.get("pv_forecast_tomorrow_sensor"),
+
                 "pv_current_power_sensor":
                     user_input.get("pv_current_power_sensor"),
 
@@ -235,6 +239,18 @@ class PVSmartSchedulerConfigFlow(
                 "pv_forecast_sensor",
                 default=defaults.get(
                     "pv_forecast_sensor",
+                    vol.UNDEFINED
+                )
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="sensor"
+                )
+            ),
+
+            vol.Optional(
+                "pv_forecast_tomorrow_sensor",
+                default=defaults.get(
+                    "pv_forecast_tomorrow_sensor",
                     vol.UNDEFINED
                 )
             ): selector.EntitySelector(
@@ -583,6 +599,15 @@ class PVSmartSchedulerOptionsFlowHandler(
             vol.Required(
                 "pv_forecast_sensor",
                 default=data.get("pv_forecast_sensor", vol.UNDEFINED)
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="sensor"
+                )
+            ),
+
+            vol.Optional(
+                "pv_forecast_tomorrow_sensor",
+                default=data.get("pv_forecast_tomorrow_sensor", vol.UNDEFINED)
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(
                     domain="sensor"

@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.4.1
+
+- New optional setting "PV-Prognosesensor Morgen" (kWh, or `detailedForecast` for Solcast). When the daily window is over or too weak, the planner now also checks the same schedule window on the next day and proposes the best start there ("Morgen 08:00").
+- The forecast horizon is now 36 hours (was 12) so tomorrow morning can be planned in the evening.
+- With the "today" sensor the remaining energy is only spread over the remaining daylight of today. After sunset it is no longer shifted onto tomorrow when a tomorrow sensor is set.
+- When there is no usable PV window, the card shows "Kein PV-Fenster" instead of a start time right now with a warning icon.
+- Sensor freshness uses `last_reported`, so sensors that keep reporting the same value (for example 0 W) are no longer marked as stale. Discrete state entities such as `input_boolean`, `climate` and `binary_sensor` are never marked as stale.
+- A configured sensor that does not exist now shows "Sensor nicht gefunden: <entity>", an unavailable one "Sensor nicht verfügbar" (new attributes `power_problem` and `device_state_problem`).
+- Card: the "Jetzt" marker and the time axis now align with the bars; they previously spanned the label column as well.
+- New attributes `pv_forecast_tomorrow_sensor`, `forecast_tomorrow_kwh`, `forecast_tomorrow_status`, and plan reasons `tomorrow_window` and `no_pv_window`.
+
 ## v0.4.0
 
 - Fixed the numeric parser: values such as `1.942` or `12.345` were read as thousands (1942 / 12345). A single separator is now always a decimal separator.

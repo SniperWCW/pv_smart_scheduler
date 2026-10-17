@@ -8,6 +8,7 @@
           "device_power_sensor": "Geräte-Leistungssensor",
           "device_state_sensor": "Geräte-Statussensor",
           "pv_forecast_sensor": "PV-Prognosesensor",
+          "pv_forecast_tomorrow_sensor": "PV-Prognosesensor Morgen",
           "pv_current_power_sensor": "Aktuelle PV-Leistung",
           "home_base_load_sensor": "Haus-Basislast",
           "battery_soc_sensor": "Batterie-SoC",
@@ -31,6 +32,7 @@
           "device_power_sensor": "Leistungssensor des Geräts in Watt, z. B. Waschmaschine, Trockner oder Pool.",
           "device_state_sensor": "Optionaler Statussensor des Geräts, z. B. climate-, switch- oder binary_sensor-Entität. Wenn gesetzt, entscheidet dieser Sensor den Laufstatus.",
           "pv_forecast_sensor": "Sensor für die erwartete PV-Leistung in Watt. Wird für die Planung der nächsten Stunden verwendet.",
+          "pv_forecast_tomorrow_sensor": "Optional: Sensor mit der PV-Prognose für den morgigen Tag in kWh. Damit kann abends der morgige Vormittag eingeplant werden.",
           "pv_current_power_sensor": "Optionaler Sensor für die aktuelle PV-Produktion in Watt. Verbessert Entscheidungen bei aktueller Sonne.",
           "home_base_load_sensor": "Aktueller Grundverbrauch des Hauses in Watt. Dieser Verbrauch wird von der PV-Leistung abgezogen.",
           "battery_soc_sensor": "Optionaler Batterie-Ladestand in Prozent.",
@@ -95,6 +97,7 @@
         "description": "Passe die globalen Sensoren für PV, Hausverbrauch und Batterie an. Die bereits konfigurierten Geräte bleiben erhalten.",
         "data": {
           "pv_forecast_sensor": "PV-Prognosesensor",
+          "pv_forecast_tomorrow_sensor": "PV-Prognosesensor Morgen",
           "pv_current_power_sensor": "Aktuelle PV-Leistung",
           "home_base_load_sensor": "Haus-Basislast",
           "battery_soc_sensor": "Batterie-SoC",
@@ -111,6 +114,7 @@
         },
         "data_description": {
           "pv_forecast_sensor": "Sensor für die erwartete PV-Leistung in Watt.",
+          "pv_forecast_tomorrow_sensor": "Optional: Sensor mit der PV-Prognose für den morgigen Tag in kWh. Damit kann abends der morgige Vormittag eingeplant werden.",
           "pv_current_power_sensor": "Optionaler Sensor für die aktuelle PV-Produktion in Watt.",
           "home_base_load_sensor": "Aktueller Grundverbrauch des Hauses in Watt.",
           "battery_soc_sensor": "Optionaler Batterie-Ladestand in Prozent.",

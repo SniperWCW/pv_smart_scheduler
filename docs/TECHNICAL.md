@@ -90,7 +90,7 @@ Das ist besonders fuer Klimaanlagen wichtig, weil der Leistungswert kurzfristig 
 
 ## PV-Forecast
 
-Der Forecast wird in `_get_pv_forecast(...)` in eine Liste von Wattwerten mit 720 Minuten Horizont umgerechnet.
+Der Forecast wird in `_get_pv_forecast(...)` in eine Liste von Wattwerten mit 2160 Minuten (36 Stunden) Horizont umgerechnet.
 
 Unterstuetzte Quellen:
 
@@ -102,6 +102,9 @@ Unterstuetzte Quellen:
   - ohne Detaildaten wird daraus eine konstante Durchschnittsleistung über das Tageslichtfenster berechnet
   - das Fenster stammt aus `sun.sun` (`next_rising`/`next_setting`), ohne diese Entität gilt 07:00 bis 21:00 Uhr
   - außerhalb des Fensters ist die Prognose 0 W
+  - heute gilt der Wert nur bis Sonnenuntergang; nach Sonnenuntergang gibt es für heute kein Fenster mehr
+  - der optionale Morgen-Sensor (`pv_forecast_tomorrow_sensor`, kWh oder `detailedForecast`) wird auf das Fenster von morgen verteilt
+  - ohne Morgen-Sensor wird die Energie nach Sonnenuntergang wie bisher auf das nächste Fenster gelegt
 - Solcast `detailedForecast`:
   - wird bevorzugt genutzt
   - jedes 30-Minuten-Intervall mit `pv_estimate` in kWh wird in durchschnittliche W umgerechnet
@@ -167,7 +170,9 @@ Suchraum:
 - Startfenster aus `schedule_start_time` und `schedule_end_time`
 - 15-Minuten-Raster
 - zusaetzlich exakt `earliest_start`, falls dieser nicht auf dem Raster liegt
-- maximal 720 Minuten Forecast-Horizont
+- maximal 2160 Minuten Forecast-Horizont
+- erreicht kein Start heute die Zielabdeckung, wird dasselbe Startfenster am Folgetag geprüft; ist die Abdeckung dort höher, wird dieser Start gewählt (`plan_reason: tomorrow_window`)
+- liegt die beste Abdeckung unter 5 %, lautet der Grund `no_pv_window`; die Karte zeigt dann "Kein PV-Fenster"
 
 Pro Kandidat:
 

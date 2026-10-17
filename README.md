@@ -40,6 +40,7 @@ Pflicht:
 
 Optional:
 
+- PV-Prognosesensor fuer morgen in kWh (damit abends der morgige Vormittag geplant werden kann)
 - Geraete-Statussensor, z. B. `climate.*`, `switch.*` oder `binary_sensor.*`
 - Aktuelle PV-Leistung in W
 - Batterie-SoC in %
@@ -92,6 +93,9 @@ Die Entitaet `sensor.pv_smart_scheduler_zentrale` liefert unter anderem:
 - `grid_import_energy_kwh`: aktueller Stand des Netzbezugszaehlers
 - `grid_export_energy_kwh`: aktueller Stand des Einspeisezaehlers
 - `night_consumption_sensor`: konfigurierter Sensor fuer den letzten Nachtverbrauch
+- `pv_forecast_tomorrow_sensor`: optionaler Prognosesensor fuer morgen (kWh)
+- `forecast_tomorrow_kwh` und `forecast_tomorrow_status`: Wert und Status der Morgen-Prognose
+- pro Geraet: `power_problem` und `device_state_problem` (`missing` oder `unavailable`), dazu `plan_reason` mit `tomorrow_window` (bester Start morgen) und `no_pv_window` (kein PV-Fenster in Sicht)
 - `schedule_start_time`: frueheste Startzeit fuer geplante Geraetestarts
 - `schedule_end_time`: spaeteste Startzeit fuer geplante Geraetestarts
 - `battery_night_warning`: `true`, wenn eine Warnung fuer die Nacht angezeigt werden soll

@@ -22,7 +22,9 @@ PROFILE_LOOKBACK_DAYS = 14
 PROFILE_SAMPLE_LIMIT = 5
 DEFAULT_BATTERY_MIN_SOC = 25
 DEVICE_ACTIVE_POWER_THRESHOLD = 15
-FORECAST_HORIZON_MINUTES = 720
+# 36 Stunden: genug, um abends auch den morgigen Vormittag einzuplanen.
+FORECAST_HORIZON_MINUTES = 2160
+NO_PV_WINDOW_COVERAGE = 5.0
 DEFAULT_SCHEDULE_START_TIME = "05:00"
 DEFAULT_SCHEDULE_END_TIME = "23:00"
 DEFAULT_NIGHT_HOURS = 12
@@ -32,7 +34,7 @@ MAX_PROFILE_POWER_W = 25000
 MAX_PROFILE_ENERGY_WH = 50000
 ACTIVE_STATE_SENSOR_GRACE_MINUTES = 90
 CARD_MODULE_FILENAME = "pv-smart-scheduler-card.js"
-INTEGRATION_VERSION = "0.4.0"
+INTEGRATION_VERSION = "0.4.1"
 CARD_RESOURCE_BASE_URL = f"/{DOMAIN}/{CARD_MODULE_FILENAME}"
 CARD_RESOURCE_URL = f"{CARD_RESOURCE_BASE_URL}?v={INTEGRATION_VERSION}"
 
@@ -210,6 +212,9 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
 
                         "pv_forecast_sensor":
                             value.get("pv_forecast_sensor"),
+
+                        "pv_forecast_tomorrow_sensor":
+                            value.get("pv_forecast_tomorrow_sensor"),
 
                         "home_base_load_sensor":
                             value.get("home_base_load_sensor"),
@@ -404,11 +409,33 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             return False
 
         try:
-            age_seconds = (dt_util.utcnow() - state.last_updated).total_seconds()
+            # Ein Sensor, der konstant denselben Wert meldet (z. B. 0 W), ändert
+            # last_updated nicht. last_reported zeigt, dass er weiter meldet.
+            last_seen = state.last_updated
+            last_reported = getattr(state, "last_reported", None)
+            if last_reported is not None and last_reported > last_seen:
+                last_seen = last_reported
+            age_seconds = (dt_util.utcnow() - last_seen).total_seconds()
         except (AttributeError, TypeError):
             return False
 
         return age_seconds <= (max_age_minutes * 60)
+
+    def _sensor_problem(self, entity_id, state):
+        """Kurzer Code für den Zustand eines konfigurierten Sensors."""
+        if not entity_id:
+            return None
+        if state is None:
+            return "missing"
+        if state.state in ("unavailable", "unknown"):
+            return "unavailable"
+        return None
+
+    def _is_stale(self, entity_id, state):
+        """Veraltet-Prüfung. Nur sensor-Entitäten melden regelmäßig neu."""
+        if state is None or entity_id.split(".", 1)[0] != "sensor":
+            return None if state is None else False
+        return not self._is_state_recent(state, ACTIVE_STATE_SENSOR_GRACE_MINUTES)
 
     def _is_device_running(self, current_power, state_sensor_state=None):
         """Returns device activity using power and an optional state sensor."""
@@ -461,7 +488,10 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
 
         sorted_devices = sorted(self.devices_config.items(), key=lambda x: x[1]["priority"])
         first_config = sorted_devices[0][1]
-        raw_forecast, forecast_context = self._get_pv_forecast(first_config["pv_forecast_sensor"])
+        raw_forecast, forecast_context = self._get_pv_forecast(
+            first_config["pv_forecast_sensor"],
+            first_config.get("pv_forecast_tomorrow_sensor")
+        )
         weather_stability = self._calculate_weather_stability(first_config["pv_forecast_sensor"])
         current_pv_power = self._get_float_state(first_config.get("pv_current_power_sensor"), 0.0)
         battery_soc = self._get_float_state(first_config.get("battery_soc_sensor"))
@@ -497,6 +527,7 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         remaining_battery_wh = battery_available_wh
         self.last_context = {
             "pv_forecast_sensor": first_config.get("pv_forecast_sensor"),
+            "pv_forecast_tomorrow_sensor": first_config.get("pv_forecast_tomorrow_sensor"),
             "home_base_load_sensor": first_config.get("home_base_load_sensor"),
             "pv_current_power_sensor": first_config.get("pv_current_power_sensor"),
             "battery_soc_sensor": first_config.get("battery_soc_sensor"),
@@ -609,11 +640,50 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                     schedule_end_offset
                 )
                 plan_reason = "pv_window"
+
+                # Reicht das Zeitfenster von heute nicht aus, wird dasselbe
+                # Startfenster am Folgetag geprüft (z. B. morgen Vormittag).
+                if (
+                    profile
+                    and not cooldown_remaining
+                    and max_coverage < config.get("target_coverage", 90)
+                ):
+                    next_day = self._next_day_schedule_offsets(
+                        schedule_start_time,
+                        schedule_end_time
+                    )
+                    next_day_start, next_day_end = next_day if next_day else (None, None)
+                    if (
+                        next_day_start is not None
+                        and next_day_start > schedule_start_offset
+                        and next_day_start < len(virtual_pv_forecast)
+                    ):
+                        alt_start, alt_coverage, alt_battery_wh = self._calculate_best_window(
+                            profile,
+                            virtual_pv_forecast,
+                            clean_base_load,
+                            remaining_battery_wh,
+                            battery_trace,
+                            battery_charge_power,
+                            battery_discharge_power,
+                            max_battery_budget_wh,
+                            config.get("target_coverage", 90),
+                            next_day_start,
+                            next_day_end
+                        )
+                        if alt_coverage > max_coverage:
+                            best_start = alt_start
+                            max_coverage = alt_coverage
+                            battery_used_wh = alt_battery_wh
+                            plan_reason = "tomorrow_window"
+
                 if not profile:
                     plan_reason = "profile_missing"
                 elif cooldown_remaining:
                     plan_reason = "minimum_pause"
                 elif max_coverage < config.get("target_coverage", 90):
+                    if plan_reason == "pv_window" and max_coverage < NO_PV_WINDOW_COVERAGE:
+                        plan_reason = "no_pv_window"
                     offpeak_offset = self._next_time_offset(config.get("offpeak_start_time"))
                     if offpeak_offset is not None and offpeak_offset <= schedule_end_offset:
                         best_start = offpeak_offset
@@ -653,11 +723,13 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                     "power_state": state.state if state else None,
                     "power_unit": state.attributes.get("unit_of_measurement") if state else None,
                     "power_last_updated": state.last_updated.isoformat() if state else None,
-                    "power_is_stale": not self._is_state_recent(state, ACTIVE_STATE_SENSOR_GRACE_MINUTES) if state else True,
+                    "power_problem": self._sensor_problem(entity_id, state),
+                    "power_is_stale": self._is_stale(entity_id, state) is not False,
                     "device_state_sensor": device_state_sensor,
                     "device_state": state_sensor_state.state if state_sensor_state else None,
                     "device_state_last_updated": state_sensor_state.last_updated.isoformat() if state_sensor_state else None,
-                    "device_state_is_stale": not self._is_state_recent(state_sensor_state, ACTIVE_STATE_SENSOR_GRACE_MINUTES) if state_sensor_state else None,
+                    "device_state_problem": self._sensor_problem(device_state_sensor, state_sensor_state),
+                    "device_state_is_stale": self._is_stale(device_state_sensor, state_sensor_state) if state_sensor_state else None,
                     "best_start_mins": best_start,
                     "coverage_percent": round(max_coverage, 1),
                     "total_kwh": round(total_kwh, 2),
@@ -916,27 +988,60 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             )
         )
 
-    def _get_pv_forecast(self, forecast_sensor_id):
+    def _get_pv_forecast(self, forecast_sensor_id, tomorrow_sensor_id=None):
         state = self.hass.states.get(forecast_sensor_id)
         context = {
             "forecast_source_unit": None,
             "forecast_remaining_kwh": None,
             "forecast_average_power": None,
-            "forecast_status": "available"
+            "forecast_status": "available",
+            "forecast_tomorrow_kwh": None,
+            "forecast_tomorrow_status": None
         }
+        tomorrow_state = self.hass.states.get(tomorrow_sensor_id) if tomorrow_sensor_id else None
+        tomorrow_kwh = None
+        if tomorrow_sensor_id:
+            tomorrow_kwh = self._read_energy_kwh(tomorrow_state)
+            context["forecast_tomorrow_status"] = "available" if tomorrow_kwh is not None else "unavailable"
+            context["forecast_tomorrow_kwh"] = round(tomorrow_kwh, 3) if tomorrow_kwh is not None else None
+
+        today_window, tomorrow_window, window_known = self._get_daylight_windows()
+
+        def spread(forecast, window, kwh, only_empty=False):
+            """Verteilt eine Tagesenergie gleichmäßig auf ein Tageslichtfenster."""
+            start, end = window
+            length = max(60, end - start)
+            power = max(0.0, (kwh * 1000.0) / (length / 60.0))
+            for minute in range(max(0, start), min(FORECAST_HORIZON_MINUTES, start + length)):
+                if not only_empty or forecast[minute] == 0.0:
+                    forecast[minute] = power
+            return power
 
         if not state or state.state in ("unknown", "unavailable"):
             context["forecast_status"] = "unavailable"
-            return [0.0] * FORECAST_HORIZON_MINUTES, context
+            forecast = [0.0] * FORECAST_HORIZON_MINUTES
+            # Fällt die heutige Prognose aus, kann morgen trotzdem geplant werden.
+            if tomorrow_kwh is not None:
+                spread(forecast, tomorrow_window, tomorrow_kwh)
+            return forecast, context
 
         unit = state.attributes.get("unit_of_measurement")
         context["forecast_source_unit"] = unit
 
         detailed_forecast = state.attributes.get("detailedForecast")
         if isinstance(detailed_forecast, list):
-            forecast = self._forecast_from_detailed_intervals(detailed_forecast)
+            intervals = list(detailed_forecast)
+            tomorrow_detailed = tomorrow_state.attributes.get("detailedForecast") if tomorrow_state else None
+            if isinstance(tomorrow_detailed, list):
+                intervals.extend(tomorrow_detailed)
+                tomorrow_detailed_used = True
+            else:
+                tomorrow_detailed_used = False
+            forecast = self._forecast_from_detailed_intervals(intervals)
             if forecast:
-                context["forecast_average_power"] = round(sum(forecast) / len(forecast), 1)
+                if tomorrow_kwh is not None and not tomorrow_detailed_used:
+                    spread(forecast, tomorrow_window, tomorrow_kwh, only_empty=True)
+                context["forecast_average_power"] = round(sum(forecast[:720]) / 720, 1)
                 try:
                     context["forecast_remaining_kwh"] = round(float(state.attributes.get("estimate", state.state)), 3)
                 except (TypeError, ValueError):
@@ -947,36 +1052,58 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             forecast_value = float(state.attributes.get("estimate", state.state))
         except (TypeError, ValueError):
             context["forecast_status"] = "invalid"
-            return [0.0] * FORECAST_HORIZON_MINUTES, context
-
-        window_start, window_end, window_known = self._get_daylight_window()
+            forecast = [0.0] * FORECAST_HORIZON_MINUTES
+            if tomorrow_kwh is not None:
+                spread(forecast, tomorrow_window, tomorrow_kwh)
+            return forecast, context
 
         if unit and unit.lower() in ("kwh", "kw h"):
-            # Die Restenergie wird nur auf das Tageslichtfenster verteilt und
-            # ist danach 0 W. Vorher wurde sie über alle 720 Minuten verteilt,
-            # also auch nachts.
-            window_length = max(60, window_end - window_start)
-            average_power = max(0.0, (forecast_value * 1000.0) / (window_length / 60.0))
-            context["forecast_remaining_kwh"] = round(forecast_value, 3)
-            context["forecast_average_power"] = round(average_power, 1)
             forecast = [0.0] * FORECAST_HORIZON_MINUTES
-            for minute in range(
-                max(0, window_start),
-                min(FORECAST_HORIZON_MINUTES, window_start + window_length)
-            ):
-                forecast[minute] = average_power
+            context["forecast_remaining_kwh"] = round(forecast_value, 3)
+            if today_window is None and tomorrow_kwh is None:
+                # Ohne Morgen-Sensor gilt wie bisher: Die Energie wird auf das
+                # nächste Tageslichtfenster verteilt.
+                average_power = spread(forecast, tomorrow_window, forecast_value)
+            else:
+                # Die Restenergie gehört zu heute. Nach Sonnenuntergang gibt es
+                # dafür kein Fenster mehr, morgen kommt vom Morgen-Sensor.
+                average_power = 0.0
+                if today_window is not None:
+                    average_power = spread(forecast, today_window, forecast_value)
+                if tomorrow_kwh is not None:
+                    tomorrow_power = spread(forecast, tomorrow_window, tomorrow_kwh)
+                    if today_window is None:
+                        average_power = tomorrow_power
+            context["forecast_average_power"] = round(average_power, 1)
             return forecast, context
 
         context["forecast_average_power"] = round(forecast_value, 1)
         # Weniger aggressiver Abfall für den Fallback-Forecast
         forecast = [max(0.0, forecast_value - (i * 1.5)) for i in range(FORECAST_HORIZON_MINUTES)]
+        next_start, next_end = today_window if today_window is not None else tomorrow_window
         if window_known:
             # Nur mit echten Sonnendaten maskieren, damit eine falsch geschätzte
             # Standardzeit keine gültige Prognose abschneidet.
             for minute in range(FORECAST_HORIZON_MINUTES):
-                if not (window_start <= minute < window_end):
+                if not (next_start <= minute < next_end):
                     forecast[minute] = 0.0
+        if tomorrow_kwh is not None:
+            spread(forecast, tomorrow_window, tomorrow_kwh, only_empty=True)
         return forecast, context
+
+    def _read_energy_kwh(self, state):
+        """Liest einen Energiesensor als kWh (Wh wird umgerechnet)."""
+        if state is None or state.state in ("unknown", "unavailable"):
+            return None
+        try:
+            value = float(state.attributes.get("estimate", state.state))
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(value):
+            return None
+        if str(state.attributes.get("unit_of_measurement") or "") == "Wh":
+            value /= 1000.0
+        return max(0.0, value)
 
     def _forecast_from_detailed_intervals(self, intervals):
         """Builds a 1-minute W forecast from Solcast-style kWh intervals."""
@@ -1024,46 +1151,70 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         return forecast
 
     def _get_daylight_window(self):
-        """Returns (start_offset, end_offset, known) of the next daylight window.
+        """Returns (start_offset, end_offset, known) of the next daylight window."""
+        today, tomorrow, known = self._get_daylight_windows()
+        window = today if today is not None else tomorrow
+        return window[0], window[1], known
 
-        Offsets are minutes from now. Scheint die Sonne gerade, beginnt das
-        Fenster bei 0 und endet zum Sonnenuntergang. Sonst umfasst es den
-        nächsten Sonnenaufgang bis Sonnenuntergang. `known` ist True, wenn die
+    def _get_daylight_windows(self):
+        """Returns (today_window, tomorrow_window, known).
+
+        Fenster sind (Start, Ende) in Minuten ab jetzt. today_window ist None,
+        sobald die Sonne heute untergegangen ist. `known` ist True, wenn die
         Zeiten aus `sun.sun` stammen, sonst gilt 07:00 bis 21:00 Uhr.
         """
         now = dt_util.now()
         sun = self.hass.states.get("sun.sun")
 
         if sun is not None:
-            def offset(attribute):
+            def local_time(attribute):
                 raw = sun.attributes.get(attribute)
                 parsed = dt_util.parse_datetime(str(raw)) if raw else None
                 if parsed is None:
                     return None
                 if parsed.tzinfo is None:
                     parsed = dt_util.as_local(parsed)
-                return int((parsed - now).total_seconds() // 60)
+                return dt_util.as_local(parsed)
 
-            setting = offset("next_setting")
-            rising = offset("next_rising")
-            if setting is not None:
+            def minutes_from_now(moment):
+                return int((moment - now).total_seconds() // 60)
+
+            setting_at = local_time("next_setting")
+            rising_at = local_time("next_rising")
+            if setting_at is not None and rising_at is not None:
+                setting = minutes_from_now(setting_at)
+                rising = minutes_from_now(rising_at)
                 if sun.state == "below_horizon":
-                    start = max(0, rising) if rising is not None else None
-                    if start is not None and setting > start:
-                        return start, setting, True
-                else:
-                    return 0, max(1, setting), True
+                    if rising_at.date() == now.date():
+                        # Vor Sonnenaufgang: heute und morgen liegen noch voraus.
+                        return (
+                            (max(0, rising), max(rising + 1, setting)),
+                            (rising + 1440, setting + 1440),
+                            True
+                        )
+                    # Nach Sonnenuntergang: nur noch morgen.
+                    return None, (max(0, rising), max(rising + 1, setting)), True
+                # Sonne steht: heute bis Sonnenuntergang, morgen ab nächstem Aufgang.
+                return (
+                    (0, max(1, setting)),
+                    (max(0, rising), max(rising + 1, setting + 1440)),
+                    True
+                )
 
         now_minutes = (now.hour * 60) + now.minute
         if now_minutes < DEFAULT_SUNRISE_MINUTES:
-            return DEFAULT_SUNRISE_MINUTES - now_minutes, DEFAULT_SUNSET_MINUTES - now_minutes, False
-        if now_minutes < DEFAULT_SUNSET_MINUTES:
-            return 0, DEFAULT_SUNSET_MINUTES - now_minutes, False
-        return (
+            return (
+                (DEFAULT_SUNRISE_MINUTES - now_minutes, DEFAULT_SUNSET_MINUTES - now_minutes),
+                (1440 + DEFAULT_SUNRISE_MINUTES - now_minutes, 1440 + DEFAULT_SUNSET_MINUTES - now_minutes),
+                False
+            )
+        tomorrow = (
             (1440 - now_minutes) + DEFAULT_SUNRISE_MINUTES,
-            (1440 - now_minutes) + DEFAULT_SUNSET_MINUTES,
-            False
+            (1440 - now_minutes) + DEFAULT_SUNSET_MINUTES
         )
+        if now_minutes < DEFAULT_SUNSET_MINUTES:
+            return (0, DEFAULT_SUNSET_MINUTES - now_minutes), tomorrow, False
+        return None, tomorrow, False
 
     def _get_float_state(self, entity_id, fallback=None):
         if not entity_id:
@@ -1233,6 +1384,18 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         if now_minutes <= end_minutes:
             return 0, end_minutes - now_minutes
         return start_minutes - now_minutes, (1440 - now_minutes) + end_minutes
+
+    def _next_day_schedule_offsets(self, start_time, end_time):
+        """Startfenster des nächsten Kalendertags als Minuten ab jetzt (oder None)."""
+        now = dt_util.now()
+        now_minutes = (now.hour * 60) + now.minute
+        start_minutes = self._parse_time_minutes(start_time, DEFAULT_SCHEDULE_START_TIME)
+        end_minutes = self._parse_time_minutes(end_time, DEFAULT_SCHEDULE_END_TIME)
+        if start_minutes == end_minutes:
+            return None
+        length = (end_minutes - start_minutes) % 1440
+        start = (1440 - now_minutes) + start_minutes
+        return start, start + length
 
     def _calculate_available_battery_wh(self, battery_soc, battery_energy_kwh, battery_capacity_kwh, min_soc):
         """Berechnet die tatsächlich nutzbare Energie oberhalb des Mindest-SoC."""
