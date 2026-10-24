@@ -505,7 +505,7 @@ class PVSmartSchedulerOptionsFlowHandler(
             ),
             vol.Optional(
                 "device_state_sensor",
-                default=current_device.get("device_state_sensor", vol.UNDEFINED)
+                description={"suggested_value": current_device.get("device_state_sensor") or None}
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig()
             ),
@@ -523,7 +523,13 @@ class PVSmartSchedulerOptionsFlowHandler(
             ),
             vol.Optional("min_run_minutes", default=current_device.get("min_run_minutes", 0)): vol.All(vol.Coerce(int), vol.Range(min=0, max=720)),
             vol.Optional("min_pause_minutes", default=current_device.get("min_pause_minutes", 0)): vol.All(vol.Coerce(int), vol.Range(min=0, max=720)),
-            vol.Optional("offpeak_start_time", default=current_device.get("offpeak_start_time", vol.UNDEFINED)): selector.TimeSelector()
+            # suggested_value statt default: gespeichertes None (kein Tarifstart)
+            # würde sonst als ungültige Zeit validiert, und das Feld ließe sich
+            # nicht mehr leeren.
+            vol.Optional(
+                "offpeak_start_time",
+                description={"suggested_value": current_device.get("offpeak_start_time") or None}
+            ): selector.TimeSelector()
         })
 
         return self.async_show_form(
