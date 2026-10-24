@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.4.4
+
+- Fixed editing a device without an optional off-peak start time: the form failed with "Invalid time specified: None". Optional fields without a value (off-peak start, device status sensor) are now empty and can be cleared again.
+
 ## v0.4.3
 
 - Fixed Solcast `detailedForecast`: `pv_estimate` is the average power of the period in kW (0.94 means 940 W), but it was treated as energy per period, so every 30 minute value was doubled. The forecast peak now matches the Solcast peak sensor.
