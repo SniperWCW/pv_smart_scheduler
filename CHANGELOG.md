@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.4.5
+
+- Card: the table and timeline are only redrawn when the scheduler sensor, the card configuration or the minute (now marker) changes. Previously every Home Assistant state update rebuilt the whole card, which caused constant flickering, especially when the card is embedded in another dashboard.
+
 ## v0.4.4
 
 - Fixed editing a device without an optional off-peak start time: the form failed with "Invalid time specified: None". Optional fields without a value (off-peak start, device status sensor) are now empty and can be cleared again.

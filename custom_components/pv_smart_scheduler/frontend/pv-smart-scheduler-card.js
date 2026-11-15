@@ -1,4 +1,4 @@
-const CARD_VERSION = '0.4.4';
+const CARD_VERSION = '0.4.5';
 
 class PVSmartSchedulerCard extends HTMLElement {
   set hass(hass) {
@@ -95,7 +95,15 @@ class PVSmartSchedulerCard extends HTMLElement {
       this.headerForecast = this.querySelector('#forecast-status');
       this.headerVersion = this.querySelector('#card-version');
       this.summary = this.querySelector('#scheduler-summary');
+      this._lastStateObj = null;
     }
+
+    // HA ruft den hass-Setter bei jeder beliebigen Zustandsänderung auf. Nur neu zeichnen, wenn sich
+    // unser Sensor (Referenz) oder Konfiguration bzw. Minute (Jetzt-Marker) geändert hat.
+    const renderKey = `${Math.floor(Date.now() / 60000)}|${this._cfgKey || ''}`;
+    if (stateObj === this._lastStateObj && renderKey === this._lastRenderKey) return;
+    this._lastStateObj = stateObj;
+    this._lastRenderKey = renderKey;
 
     let html = '';
     let timelineRowsHtml = '';
@@ -387,6 +395,7 @@ class PVSmartSchedulerCard extends HTMLElement {
 
   setConfig(config) {
     this.config = config;
+    this._cfgKey = JSON.stringify(config || {});
   }
 
   getCardSize() {
