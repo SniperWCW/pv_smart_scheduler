@@ -47,8 +47,10 @@ DEFAULT_SUNSET_MINUTES = 21 * 60
 MAX_PROFILE_POWER_W = 25000
 MAX_PROFILE_ENERGY_WH = 50000
 ACTIVE_STATE_SENSOR_GRACE_MINUTES = 90
+# Mindestabstand zwischen zwei Start-Erinnerungen je Gerät.
+START_NOTIFY_COOLDOWN_HOURS = 6
 CARD_MODULE_FILENAME = "pv-smart-scheduler-card.js"
-INTEGRATION_VERSION = "0.4.5"
+INTEGRATION_VERSION = "0.5.0"
 CARD_RESOURCE_BASE_URL = f"/{DOMAIN}/{CARD_MODULE_FILENAME}"
 CARD_RESOURCE_URL = f"{CARD_RESOURCE_BASE_URL}?v={INTEGRATION_VERSION}"
 
@@ -190,6 +192,9 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         self.last_context = {}
         self._profile_query_timestamps = {}
         self._device_activity = {}
+        self._last_recommendation = {}
+        self._start_notified_at = {}
+        self._was_running = {}
         self.profile_path = hass.config.path("pv_smart_scheduler_profiles_v3.json")
 
     async def async_refresh_devices_config(self):
@@ -262,6 +267,12 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
 
                         "night_consumption_sensor":
                             value.get("night_consumption_sensor"),
+
+                        "energy_price_eur_kwh":
+                            value.get("energy_price_eur_kwh"),
+
+                        "start_notify_services":
+                            value.get("start_notify_services"),
 
                         "schedule_start_time":
                             value.get("schedule_start_time", DEFAULT_SCHEDULE_START_TIME),
@@ -497,6 +508,8 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
         battery_capacity_kwh = self._get_float_state(first_config.get("battery_capacity_sensor"))
         battery_min_soc = first_config.get("battery_min_soc", DEFAULT_BATTERY_MIN_SOC)
         night_consumption_sensor = first_config.get("night_consumption_sensor")
+        energy_price = self._parse_price(first_config.get("energy_price_eur_kwh"))
+        notify_services = self._split_services(first_config.get("start_notify_services"))
         schedule_start_time = first_config.get("schedule_start_time", DEFAULT_SCHEDULE_START_TIME)
         schedule_end_time = first_config.get("schedule_end_time", DEFAULT_SCHEDULE_END_TIME)
         schedule_start_offset, schedule_end_offset = self._calculate_schedule_window_offsets(
@@ -713,6 +726,14 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                 recommendation = "läuft" if is_running else ("ja" if max_coverage >= config["target_coverage"] and best_start == 0 else "warten")
                 total_kwh = (sum(profile) / 60) / 1000 if profile else 0
                 duration_mins = len(profile) if profile else 0
+                run_elapsed, run_remaining, run_finish = self._run_progress(
+                    is_running, activity, state, state_sensor_state, duration_mins
+                )
+                cost_eur, saving_eur = self._estimate_cost(total_kwh, max_coverage, energy_price)
+                await self._handle_run_events(
+                    entity_id, state, is_running, recommendation, activity,
+                    notify_services, max_coverage, total_kwh, saving_eur
+                )
 
                 results[entity_id] = {
                     "recommendation": recommendation,
@@ -739,6 +760,11 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
                         config.get("min_run_minutes", 0)
                     ),
                     "minimum_pause_remaining_mins": cooldown_remaining,
+                    "run_elapsed_mins": run_elapsed,
+                    "run_remaining_mins": run_remaining,
+                    "run_finish_time": run_finish,
+                    "estimated_cost_eur": cost_eur,
+                    "estimated_saving_eur": saving_eur,
                     "best_start_time": start_time.isoformat(),
                     "weather_stability": round(weather_stability * 100, 0),
                     "priority": config["priority"],
@@ -828,6 +854,97 @@ class PVSmartSchedulerCoordinator(DataUpdateCoordinator):
             activity.get("last_stopped") or self._activity_changed_at(state, state_sensor_state),
             minimum
         )
+
+    @staticmethod
+    def _parse_price(value):
+        """Strompreis in EUR/kWh, ungültige oder nicht positive Werte ergeben None."""
+        try:
+            price = float(value)
+        except (TypeError, ValueError):
+            return None
+        return price if price > 0 else None
+
+    @staticmethod
+    def _split_services(value):
+        """Kommagetrennte notify-Dienste als Liste von Dienstnamen (ohne notify.)."""
+        if isinstance(value, str):
+            items = value.replace("\n", ",").split(",")
+        elif isinstance(value, (list, tuple)):
+            items = list(value)
+        else:
+            items = []
+        result = []
+        for item in items:
+            name = str(item).strip()
+            if name.startswith("notify."):
+                name = name[len("notify."):]
+            if name and name not in result:
+                result.append(name)
+        return result
+
+    @staticmethod
+    def _estimate_cost(total_kwh, coverage_percent, price):
+        """Geschätzte Netzkosten und Ersparnis eines Laufs in EUR (nur mit Strompreis)."""
+        if price is None or not total_kwh:
+            return None, None
+        share = min(max(coverage_percent, 0.0), 100.0) / 100.0
+        return round(total_kwh * (1 - share) * price, 2), round(total_kwh * share * price, 2)
+
+    def _run_progress(self, is_running, activity, state, state_sensor_state, duration_mins):
+        """Laufzeit, Restzeit und geplantes Ende des laufenden Programms (nur mit gelerntem Profil)."""
+        if not is_running or not duration_mins:
+            return None, None, None
+        started = activity.get("last_started") or self._activity_changed_at(state, state_sensor_state)
+        if not started:
+            return None, None, None
+        elapsed = max(0, int((dt_util.utcnow() - started).total_seconds() // 60))
+        remaining = max(0, int(duration_mins) - elapsed)
+        finish = dt_util.now() + timedelta(minutes=remaining)
+        return elapsed, remaining, finish.isoformat()
+
+    async def _handle_run_events(
+        self, entity_id, state, is_running, recommendation, activity,
+        notify_services, coverage, total_kwh, saving_eur
+    ):
+        """Start-Erinnerung beim Wechsel auf "ja" und Ereignis nach einem beendeten Lauf."""
+        name = (state.attributes.get("friendly_name") if state else None) or entity_id
+        previous = self._last_recommendation.get(entity_id)
+        self._last_recommendation[entity_id] = recommendation
+        was_running = self._was_running.get(entity_id)
+        self._was_running[entity_id] = is_running
+
+        if was_running and not is_running:
+            started = activity.get("last_started")
+            minutes = int((dt_util.utcnow() - started).total_seconds() // 60) if started else None
+            if minutes is None or minutes >= PROFILE_MIN_MINUTES:
+                self.hass.bus.async_fire(
+                    f"{DOMAIN}_run_finished",
+                    {
+                        "entity_id": entity_id,
+                        "name": name,
+                        "duration_mins": minutes,
+                    },
+                )
+
+        if previous == "warten" and recommendation == "ja" and not is_running and notify_services:
+            last = self._start_notified_at.get(entity_id)
+            now = dt_util.utcnow()
+            if last is not None and now - last < timedelta(hours=START_NOTIFY_COOLDOWN_HOURS):
+                return
+            self._start_notified_at[entity_id] = now
+            message = f"{name}: Jetzt ist ein guter Zeitpunkt zum Starten (PV-Deckung {round(coverage)} %"
+            if saving_eur:
+                message += f", spart ca. {saving_eur:.2f} €".replace(".", ",")
+            message += ")."
+            for service in notify_services:
+                try:
+                    await self.hass.services.async_call(
+                        "notify", service,
+                        {"title": "PV Smart Scheduler", "message": message},
+                        blocking=True,
+                    )
+                except Exception as err:  # ein Dienst darf andere nicht blockieren
+                    _LOGGER.warning("Benachrichtigung über notify.%s fehlgeschlagen: %s", service, err)
 
     def _next_time_offset(self, value):
         if not value:

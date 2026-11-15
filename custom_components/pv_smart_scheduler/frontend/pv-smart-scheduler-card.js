@@ -1,4 +1,4 @@
-const CARD_VERSION = '0.4.5';
+const CARD_VERSION = '0.5.0';
 
 class PVSmartSchedulerCard extends HTMLElement {
   set hass(hass) {
@@ -171,6 +171,7 @@ class PVSmartSchedulerCard extends HTMLElement {
         const pvCoverage = this.getFirstNumber(device, ['pv_coverage'], 0);
         const estimatedKwh = this.getFirstNumber(device, ['estimated_kwh'], 0);
         const batteryUsedKwh = this.getFirstNumber(device, ['battery_used_kwh'], 0);
+        const estimatedSaving = this.getFirstNumber(device, ['estimated_saving_eur'], null);
         const sensorWarning = this.sensorWarning(device);
 
         const isToday = !Number.isNaN(startTimeObj.getTime()) && startTimeObj.toDateString() === new Date().toDateString();
@@ -214,7 +215,7 @@ class PVSmartSchedulerCard extends HTMLElement {
             </td>
             <td style="padding: 10px 4px; text-align: right; font-weight: bold; color: ${statusColor};">
               ${this.formatNumber(pvCoverage, 1)}%
-              <div style="font-size: 10px; font-weight: normal; color: var(--secondary-text-color);">${this.formatNumber(estimatedKwh, 2)} kWh${batteryUsedKwh > 0 ? ` · Akku ${this.formatNumber(batteryUsedKwh, 2)} kWh` : ''}</div>
+              <div style="font-size: 10px; font-weight: normal; color: var(--secondary-text-color);">${this.formatNumber(estimatedKwh, 2)} kWh${batteryUsedKwh > 0 ? ` · Akku ${this.formatNumber(batteryUsedKwh, 2)} kWh` : ''}${estimatedSaving !== null && estimatedSaving > 0 ? ` · spart ${this.formatNumber(estimatedSaving, 2)} €` : ''}</div>
             </td>
           </tr>
         `;
@@ -285,7 +286,15 @@ class PVSmartSchedulerCard extends HTMLElement {
   }
 
   deviceStatusLabel(device, isRunning) {
-    if (isRunning) return 'Programm läuft';
+    if (isRunning) {
+      const remaining = Number(device.run_remaining_mins);
+      if (Number.isFinite(remaining) && device.run_finish_time) {
+        const finish = new Date(device.run_finish_time);
+        const finishLabel = Number.isNaN(finish.getTime()) ? '' : ` · fertig ca. ${finish.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+        return `Programm läuft · noch ca. ${remaining} Min.${finishLabel}`;
+      }
+      return 'Programm läuft';
+    }
     if (device.plan_reason === 'profile_missing') return 'Noch kein gelerntes Verbrauchsprofil';
     if (device.plan_reason === 'minimum_pause') return `Mindestpause: noch ${device.minimum_pause_remaining_mins || 0} Min.`;
     if (device.plan_reason === 'no_pv_window') return 'Kein ausreichendes PV-Fenster in Sicht';

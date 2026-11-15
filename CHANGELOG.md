@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.5.0
+
+- Running devices now show the remaining time and the expected end ("Programm läuft · noch ca. 45 Min. · fertig ca. 14:20"). It is derived from the learned profile and available as `run_elapsed_mins`, `run_remaining_mins` and `run_finish_time` per device.
+- New optional setting "Strompreis (EUR/kWh)": every device gets an estimated `estimated_cost_eur` (grid share) and `estimated_saving_eur` (share covered by PV and battery) for one run; the card shows the saving next to the energy.
+- New optional setting "Start-Erinnerung (notify-Dienste)": a notification is sent when a device switches from "warten" to "ja", at most once per 6 hours per device.
+- New event `pv_smart_scheduler_run_finished` (`entity_id`, `name`, `duration_mins`) when a run of at least 10 minutes ends, for automations.
+
 ## v0.4.5
 
 - Card: the table and timeline are only redrawn when the scheduler sensor, the card configuration or the minute (now marker) changes. Previously every Home Assistant state update rebuilt the whole card, which caused constant flickering, especially when the card is embedded in another dashboard.

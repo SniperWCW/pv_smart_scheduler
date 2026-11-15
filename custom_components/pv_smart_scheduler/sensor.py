@@ -100,7 +100,12 @@ class PVSmartSchedulerMasterSensor(
                 ),
                 "plan_reason": data.get("plan_reason"),
                 "minimum_run_remaining_mins": data.get("minimum_run_remaining_mins", 0),
-                "minimum_pause_remaining_mins": data.get("minimum_pause_remaining_mins", 0)
+                "minimum_pause_remaining_mins": data.get("minimum_pause_remaining_mins", 0),
+                "run_elapsed_mins": data.get("run_elapsed_mins"),
+                "run_remaining_mins": data.get("run_remaining_mins"),
+                "run_finish_time": data.get("run_finish_time"),
+                "estimated_cost_eur": data.get("estimated_cost_eur"),
+                "estimated_saving_eur": data.get("estimated_saving_eur")
             })
 
         context = self.coordinator.last_context or {}

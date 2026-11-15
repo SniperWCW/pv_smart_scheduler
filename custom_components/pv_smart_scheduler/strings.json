@@ -20,6 +20,8 @@
           "grid_export_energy_sensor": "Netzeinspeisung Energiezähler",
           "battery_min_soc": "Mindest-SoC für Batterie-Nutzung",
           "night_consumption_sensor": "Hausverbrauch Nacht",
+          "energy_price_eur_kwh": "Strompreis (EUR/kWh)",
+          "start_notify_services": "Start-Erinnerung (notify-Dienste)",
           "schedule_start_time": "Fr\u00fcheste Startzeit",
           "schedule_end_time": "Sp\u00e4teste Startzeit",
           "target_coverage": "Gewünschte PV-Abdeckung",
@@ -44,6 +46,8 @@
           "grid_export_energy_sensor": "Optional: kumulierender Einspeisezähler in kWh.",
           "battery_min_soc": "Unterhalb dieses Ladestands wird die Batterie nicht für Gerätestarts eingeplant.",
           "night_consumption_sensor": "Optionaler Energiesensor für den letzten Hausverbrauch in der Nacht, idealerweise in kWh.",
+          "energy_price_eur_kwh": "Optional: Strompreis in EUR/kWh. Damit werden Kosten und Ersparnis eines Laufs geschätzt.",
+          "start_notify_services": "Optional: Benachrichtigungsdienste, kommagetrennt (z. B. notify.mobile_app_iphone). Meldet, wenn ein Gerät jetzt günstig starten kann.",
           "schedule_start_time": "Vor dieser Uhrzeit werden keine neuen Gerätestarts geplant.",
           "schedule_end_time": "Nach dieser Uhrzeit werden keine neuen Gerätestarts geplant.",
           "target_coverage": "Mindestabdeckung in Prozent, die durch PV und nutzbare Batterie erreicht werden soll.",
@@ -109,6 +113,8 @@
           "grid_export_energy_sensor": "Netzeinspeisung Energiezähler",
           "battery_min_soc": "Mindest-SoC für Batterie-Nutzung",
           "night_consumption_sensor": "Hausverbrauch Nacht",
+          "energy_price_eur_kwh": "Strompreis (EUR/kWh)",
+          "start_notify_services": "Start-Erinnerung (notify-Dienste)",
           "schedule_start_time": "Fr\u00fcheste Startzeit",
           "schedule_end_time": "Sp\u00e4teste Startzeit"
         },
@@ -126,6 +132,8 @@
           "grid_export_energy_sensor": "Optional: kumulierender Einspeisezähler in kWh.",
           "battery_min_soc": "Unterhalb dieses Ladestands wird die Batterie nicht für Gerätestarts eingeplant.",
           "night_consumption_sensor": "Optionaler Energiesensor für den letzten Hausverbrauch in der Nacht, idealerweise in kWh.",
+          "energy_price_eur_kwh": "Optional: Strompreis in EUR/kWh. Damit werden Kosten und Ersparnis eines Laufs geschätzt.",
+          "start_notify_services": "Optional: Benachrichtigungsdienste, kommagetrennt (z. B. notify.mobile_app_iphone). Meldet, wenn ein Gerät jetzt günstig starten kann.",
           "schedule_start_time": "Vor dieser Uhrzeit werden keine neuen Gerätestarts geplant.",
           "schedule_end_time": "Nach dieser Uhrzeit werden keine neuen Gerätestarts geplant."
         }

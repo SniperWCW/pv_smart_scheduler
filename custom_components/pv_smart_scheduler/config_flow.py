@@ -31,6 +31,8 @@ GLOBAL_OPTIONAL_KEYS = (
     "grid_import_energy_sensor",
     "grid_export_energy_sensor",
     "night_consumption_sensor",
+    "energy_price_eur_kwh",
+    "start_notify_services",
 )
 GLOBAL_KEYS = GLOBAL_REQUIRED_KEYS + GLOBAL_OPTIONAL_KEYS
 
@@ -167,6 +169,12 @@ class PVSmartSchedulerConfigFlow(
 
                 "night_consumption_sensor":
                     user_input.get("night_consumption_sensor"),
+
+                "energy_price_eur_kwh":
+                    user_input.get("energy_price_eur_kwh"),
+
+                "start_notify_services":
+                    user_input.get("start_notify_services"),
 
                 "schedule_start_time":
                     user_input.get("schedule_start_time", "05:00"),
@@ -396,6 +404,24 @@ class PVSmartSchedulerConfigFlow(
                     device_class="energy"
                 )
             ),
+
+            vol.Optional(
+                "energy_price_eur_kwh",
+                default=defaults.get("energy_price_eur_kwh", vol.UNDEFINED)
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0,
+                    max=5,
+                    step=0.001,
+                    mode=selector.NumberSelectorMode.BOX,
+                    unit_of_measurement="€/kWh"
+                )
+            ),
+
+            vol.Optional(
+                "start_notify_services",
+                default=defaults.get("start_notify_services", vol.UNDEFINED)
+            ): selector.TextSelector(),
 
             vol.Required(
                 "schedule_start_time",
@@ -727,6 +753,24 @@ class PVSmartSchedulerOptionsFlowHandler(
                     device_class="energy"
                 )
             ),
+
+            vol.Optional(
+                "energy_price_eur_kwh",
+                default=data.get("energy_price_eur_kwh", vol.UNDEFINED)
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0,
+                    max=5,
+                    step=0.001,
+                    mode=selector.NumberSelectorMode.BOX,
+                    unit_of_measurement="€/kWh"
+                )
+            ),
+
+            vol.Optional(
+                "start_notify_services",
+                default=data.get("start_notify_services", vol.UNDEFINED)
+            ): selector.TextSelector(),
 
             vol.Required(
                 "schedule_start_time",

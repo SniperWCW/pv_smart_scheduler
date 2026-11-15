@@ -125,6 +125,10 @@ Pro Geraet werden unter anderem geliefert:
 - `estimated_kwh`: erwarteter Energiebedarf
 - `battery_used_kwh`: eingeplante Batterie-Energie
 - `weather_confidence`: Diagnosewert zur Forecast-Stabilitaet
+- `run_elapsed_mins`, `run_remaining_mins`, `run_finish_time`: Laufzeit, Restzeit und geplantes Ende eines laufenden Programms (nur mit gelerntem Profil)
+- `estimated_cost_eur`, `estimated_saving_eur`: geschaetzte Netzkosten und Ersparnis eines Laufs (nur mit konfiguriertem Strompreis)
+
+Optionale globale Einstellungen: **Strompreis (EUR/kWh)** und **Start-Erinnerung (notify-Dienste, kommagetrennt)**. Die Erinnerung wird gesendet, wenn ein Geraet von `warten` auf `ja` wechselt (hoechstens alle 6 Stunden pro Geraet). Nach jedem beendeten Lauf ab 10 Minuten wird das Ereignis `pv_smart_scheduler_run_finished` mit `entity_id`, `name` und `duration_mins` ausgeloest.
 
 ## Technische Dokumentation
 
